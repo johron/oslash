@@ -127,9 +127,9 @@ Token next_token(Lexer *l) {
     advance(l);
 
     switch (c) {
-        case ';': return (Token){TOK_TERM};
-        case '\n': return (Token){TOK_TERM};
-        case '\0': return (Token){TOK_EOF};
+        case ';': return (Token){ .type = TOK_TERM };
+        case '\n': return (Token){ .type = TOK_TERM };
+        case '\0': return (Token){ .type = TOK_EOF };
         default:
             printf("Unknown character: %c\n", c);
             exit(1);
@@ -172,6 +172,23 @@ TokenArray lex_all(Lexer *l) {
     return arr;
 }
 
+void free_array(TokenArray *a) {
+    if (a == NULL) return;
+
+    for (size_t i = 0; i < a->size; i++) {
+        if (a->data[i].str_value != NULL) {
+            free(a->data[i].str_value); 
+            a->data[i].str_value = NULL;
+        }
+    }
+
+    free(a->data);
+    a->data = NULL;
+
+    a->size = 0;
+    a->cap = 0;
+}
+
 int main() {
     char input[] = "echo \"Hello, world!!\"";
 
@@ -186,4 +203,6 @@ int main() {
         printf("    value: '%s'\n", tok_array.data[i].str_value);
         printf("    value: '%d'\n", tok_array.data[i].num_value);
     }
+
+    free_array(&tok_array);
 }
