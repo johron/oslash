@@ -107,9 +107,9 @@ ASTNode* parse_stmt(Parser *p) {
 
             if (strcmp(tok.value.str_value, "fn") == false) { // fn x(...)
                 return parse_func_decl_stmt(p);
-            } else if (strcmp(tok.value.str_value, "let") == false) { // let $x = ...
+            } else if (strcmp(tok.value.str_value, "let") == false) { // let $x = ... (;)
 
-            } else { // treat as function call
+            } else { // treat as function call 
 
             }
 
