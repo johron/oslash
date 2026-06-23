@@ -21,7 +21,7 @@ typedef enum {
 
     NODE_VALUE_NUMBER,
     NODE_VALUE_STRING,
-    NODE_VALUE_IDENT,
+    NODE_VALUE_VAR_REF,
 } NodeType;
 
 typedef union {
@@ -50,10 +50,16 @@ typedef struct {
     Block *args;
 } FuncCall;
 
+typedef struct {
+    char* name;
+    ASTNode *expr;
+} VarDecl;
+
 struct ASTNode {
     NodeType type;
     union {
         Block block;
+        VarDecl var_decl;
         FuncDecl func_decl;
         FuncCall func_call;
 
@@ -72,6 +78,7 @@ struct ASTNode {
 
 ASTNode* parse_stmt(Parser *p);
 
+ASTNode* parse_var_decl_stmt(Parser *p);
 ASTNode* parse_func_decl_stmt(Parser *p);
 ASTNode* parse_func_call_stmt(Parser *p);
 

@@ -128,16 +128,12 @@ ASTNode* parse_stmt(Parser *p) {
             if (strcmp(tok.value.str_value, "fn") == false) { // fn x(...)
                 return parse_func_decl_stmt(p);
             } else if (strcmp(tok.value.str_value, "let") == false) { // let $x = ... (;)
-                
+                return parse_var_decl_stmt(p);
             } else { // treat as function call 
                 return parse_func_call_stmt(p);
             }
 
             printf("parse_stmt() is unimplemented for TOK_STR\n");
-            exit(1);
-        };
-        case TOK_DOLLAR: { // Variable reference
-            printf("parse_stmt() is unimplemented for TOK_DOLLAR\n");
             exit(1);
         };
         case TOK_LPAREN: { // statement enclosure
@@ -151,6 +147,31 @@ ASTNode* parse_stmt(Parser *p) {
             exit(1);
         };
     }
+}
+
+ASTNode* parse_var_decl_stmt(Parser *p) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+
+    parser_expect(p, TOK_STR, "Expected let keyword to declare variable");
+    parser_expect(p, TOK_DOLLAR, "Expected dollar sign to name variable in declaration");
+    Token var_tok = parser_expect(p, TOK_STR, "Expected string/identifier variable name for declaration");
+    parser_expect(p, TOK_EQUAL, "Expected equals sign in variable declarataion");
+
+    ASTNode *expr = parse_expr(p);
+
+    if (parser_peek(p).type != TOK_EOF) {
+        parser_expect(p, TOK_SEMICOLON, "Expected semicolon to complete variable declaration");
+    }
+
+    VarDecl var_decl = {
+        .name = var_tok.value.str_value,
+        .expr = expr,
+    };
+
+    node->type = NODE_VAR_DECL_STMT;
+    node->data.var_decl = var_decl;
+
+    return node;
 }
 
 ASTNode* parse_func_call_stmt(Parser *p) {
@@ -243,6 +264,12 @@ ASTNode* parse_primary_expr(Parser *p) {
         case TOK_NUM: parser_advance(p); return parser_create_member_node(NODE_VALUE_NUMBER, token.value);
         case TOK_STR: parser_advance(p); return parser_create_member_node(NODE_VALUE_STRING, token.value);
 
+        case TOK_DOLLAR: {
+            parser_advance(p);
+            Token var_tok = parser_expect(p, TOK_STR, "Expected variable name for variable reference");
+            return parser_create_member_node(NODE_VALUE_VAR_REF, var_tok.value);
+        };
+
         case TOK_LPAREN: {
             parser_advance(p);
             ASTNode *node = parse_expr(p);
@@ -299,11 +326,11 @@ ASTNode* parse_term_expr(Parser *p) {
 
 
 ASTNode* parse_expr(Parser *p) {
-    bool enclosed = false;
-    if (parser_peek(p).type == TOK_LPAREN) {
-        parser_advance(p);
-        enclosed = true;
-    }
+    //bool enclosed = false;
+    //if (parser_peek(p).type == TOK_LPAREN) {
+    //    parser_advance(p);
+    //    enclosed = true;
+    //}
 
     ASTNode *expr = parse_term_expr(p);
 
@@ -317,9 +344,9 @@ ASTNode* parse_expr(Parser *p) {
         expr = parser_create_binary_op_node(op, expr, right);
     }
 
-    if (enclosed == true) {
-        parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close expression enclosure");
-    }
+    //if (enclosed == true) {
+    //    parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close expression enclosure");
+    //}
 
     return expr;
 }

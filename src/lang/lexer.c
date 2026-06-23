@@ -197,9 +197,10 @@ Token lexer_next_token(Lexer *l) {
             if (lexer_peek(l) == ':') {
                 lexer_advance(l);
                 return (Token) { .type = TOK_DB_COLON };
-            } else {
-                // continue, right?
             }
+
+            fprintf(stderr, "Unexpected ':'\n");
+            exit(1);
         }
         
         case ',': return (Token) { .type = TOK_COMMA };

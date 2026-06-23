@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 int main() {
-    char input[] = "echo::(\"hihih\", 42);";
+    char input[] = "let $x = 2; let $y = ($x + 2);";
 
     Lexer lexer = {
         .src = input,
