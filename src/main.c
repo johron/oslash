@@ -1,5 +1,6 @@
 #include "lang/lexer.h"
 #include "lang/parser.h"
+#include "lang/evaluator.h"
 
 #include <stdio.h>
 
@@ -19,6 +20,8 @@ int main() {
 
     ASTNode *ast = parse_block(&parser);
     printf("%d\n", ast->type);
+
+    RuntimeValue value = evaluate(ast);
 
     free_tok_array(&tok_array);
 

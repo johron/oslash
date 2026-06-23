@@ -20,6 +20,7 @@ int main(int argc, char **argv)
         "src/main.c",
         "src/lang/lexer.c",
         "src/lang/parser.c",
+        "src/lang/evaluator.c",
         "-o",
         "build/ø"
     );
