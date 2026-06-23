@@ -6,7 +6,6 @@
 typedef enum {
     TOK_STR,
     TOK_NUM,
-    TOK_IDENT,
 
     TOK_PLUS,
     TOK_MINUS,
@@ -20,29 +19,35 @@ typedef enum {
     TOK_BANG,
     TOK_COMMA,
     TOK_PIPE,
+    TOK_DOLLAR,
+    TOK_ARROW,
 
+    TOK_DB_MORE,
     TOK_DB_EQUAL,
     TOK_BANG_EQUAL,
     TOK_LESS_EQUAL,
     TOK_MORE_EQUAL,
 
-    TOK_LEFT_PAREN,
-    TOK_RIGHT_PAREN,
-    TOK_LEFT_BRACE,
-    TOK_RIGHT_BRACE,
+    TOK_LPAREN,
+    TOK_RPAREN,
+    TOK_LBRACE,
+    TOK_RBRACE,
+    //TOK_LBRACKET,
+    //TOK_RBRACKET,
 
     TOK_SEMICOLON,
     TOK_NEWLINE,
     TOK_EOF,
 } TokenType;    
 
+typedef union {
+    int num_value;
+    char* str_value;
+} TokenValue;
+
 typedef struct {
     TokenType type;
-    union {
-        int num_value;
-        char* str_value;
-        char* ident_value;
-    } value;
+    TokenValue value;
 } Token;
 
 typedef struct {
@@ -59,6 +64,6 @@ typedef struct {
 const char* get_token_type_string(TokenType type);
 
 TokenArray lex_all(Lexer *l);
-void free_array(TokenArray *a);
+void free_tok_array(TokenArray *a);
 
 #endif
