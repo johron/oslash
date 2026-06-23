@@ -41,14 +41,20 @@ typedef struct {
     char* name;
     // arguments
     char* ret_type;
-    Block block;
+    ASTNode *body; // NodeType = NODE_BLOCK
 } FuncDecl;
+
+typedef struct {
+    char* name;
+    Block *args;
+} FuncCall;
 
 struct ASTNode {
     NodeType type;
     union {
         Block block;
         FuncDecl func_decl;
+        FuncCall func_call;
         struct {
             char op;
             ASTNode *left;
@@ -61,10 +67,11 @@ struct ASTNode {
 ASTNode* parse_stmt(Parser *p);
 
 ASTNode* parse_func_decl_stmt(Parser *p);
+ASTNode* parse_func_call_stmt(Parser *p);
 
 ASTNode* parse_block(Parser *l);
 ASTNode* parser_create_member_node(NodeType type, TokenValue value);
-ASTNode* parser_create_binary_node(char op, ASTNode *left, ASTNode *right);
+ASTNode* parser_create_binary_op_node(char op, ASTNode *left, ASTNode *right);
 
 Token parser_peek(Parser *p);
 Token parser_advance(Parser *p);

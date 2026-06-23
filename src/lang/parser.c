@@ -86,7 +86,7 @@ ASTNode* parser_create_member_node(NodeType type, TokenValue value) {
     return node;
 }
 
-ASTNode* parser_create_binary_node(char op, ASTNode *left, ASTNode *right) {
+ASTNode* parser_create_binary_op_node(char op, ASTNode *left, ASTNode *right) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
         return NULL;
@@ -100,17 +100,19 @@ ASTNode* parser_create_binary_node(char op, ASTNode *left, ASTNode *right) {
     return node;
 }
 
+ASTNode* parse_stmt(Parser *p);
+
 ASTNode* parse_stmt(Parser *p) {
     switch (p->tok_array.data[p->pos].type) {
         case TOK_STR: {
-            Token tok = parser_expect(p, TOK_STR, "Expected a string/identifier while parsing statement");
+            Token tok = parser_peek(p);
 
             if (strcmp(tok.value.str_value, "fn") == false) { // fn x(...)
                 return parse_func_decl_stmt(p);
             } else if (strcmp(tok.value.str_value, "let") == false) { // let $x = ... (;)
-
+                
             } else { // treat as function call 
-
+                return parse_func_call_stmt(p);
             }
 
             printf("parse_stmt() is unimplemented for TOK_STR\n");
@@ -120,6 +122,12 @@ ASTNode* parse_stmt(Parser *p) {
             printf("parse_stmt() is unimplemented for TOK_DOLLAR\n");
             exit(1);
         };
+        case TOK_LPAREN: { // statement enclosure
+            parser_advance(p);
+            ASTNode *stmt = parse_stmt(p);
+            parser_expect(p, TOK_RPAREN, "Expected parenthesis to close statement enclosure");
+            return stmt;
+        };
         default: { // TODO: add some expression statement stuff somewhere here
             fprintf(stderr, "Unexpected tokens found while parsing statement, got %s\n", get_token_type_string(p->tok_array.data[p->pos].type));
             exit(1);
@@ -127,9 +135,50 @@ ASTNode* parse_stmt(Parser *p) {
     }
 }
 
+ASTNode* parse_func_call_stmt(Parser *p) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+
+    Token func_tok = parser_expect(p, TOK_STR, "Expected the string/identifier to call");
+
+    Block args;
+    parser_init_block(&args);
+
+    if (parser_peek(p).type == TOK_LPAREN) { // parse as func(arg1, arg2, ...)
+        parser_advance(p);
+        while (parser_peek(p).type != TOK_RPAREN) {
+            ASTNode *expr = parse_expr(p);
+
+            printf("%s\n", get_token_type_string(parser_peek(p).type));
+            if (parser_peek(p).type != TOK_RPAREN) {
+                parser_expect(p, TOK_COMMA, "Expected comma to continue argument list");
+            }
+
+            parser_block_push_node(&args, expr);
+        }
+
+        parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close function call");
+    } else { // parse as func arg1 arg2 ...;
+        
+
+        printf("parse_func_call_stmt() is unimplemented for function call type 2\n");
+        exit(1);
+    }
+
+    FuncCall func_call = {
+        .args = &args,
+        .name = func_tok.value.str_value,
+    };
+
+    node->type = NODE_FUNC_CALL_STMT;
+    node->data.func_call = func_call;
+
+    return node;
+}
+
 ASTNode* parse_func_decl_stmt(Parser *p) {
     ASTNode *node = malloc(sizeof(ASTNode));
 
+    parser_expect(p, TOK_STR, "Expected fn keyword to declare function");
     Token name_tok = parser_expect(p, TOK_STR, "Expected a string/identifier for function name");
     parser_expect(p, TOK_LPAREN, "Expected parenthesis to open argument definition for function declaration");
     // parse argument definition
@@ -145,7 +194,7 @@ ASTNode* parse_func_decl_stmt(Parser *p) {
     FuncDecl func_decl = {
         .name = name_tok.value.str_value,
         .ret_type = ret_type_tok.value.str_value,
-        //.block = 
+        .body = body,
     };
 
     node->type = NODE_FUNC_DECL_STMT;
@@ -176,9 +225,44 @@ ASTNode* parse_primary_expr(Parser *p) {
 }
 
 ASTNode* parse_term_expr(Parser *p) {
+    ASTNode *expr = parse_primary_expr(p);
 
+    while (parser_peek(p).type == TOK_STAR || parser_peek(p).type == TOK_SLASH) {
+        Token op_token = parser_peek(p);
+        parser_advance(p);
+        
+        char op = (op_token.type == TOK_STAR) ? '*' : '/';
+        
+        ASTNode *right = parse_primary_expr(p);
+        expr = parser_create_binary_op_node(op, expr, right);
+    }
+
+    return expr;
 }
 
-ASTNode* parse_expr(Parser *p) {
 
+ASTNode* parse_expr(Parser *p) {
+    bool enclosed = false;
+    if (parser_peek(p).type == TOK_LPAREN) {
+        parser_advance(p);
+        enclosed = true;
+    }
+
+    ASTNode *expr = parse_term_expr(p);
+
+    while (parser_peek(p).type == TOK_PLUS || parser_peek(p).type == TOK_MINUS) {
+        Token op_token = parser_peek(p);
+        parser_advance(p);
+        
+        char op = (op_token.type == TOK_PLUS) ? '+' : '-';
+        
+        ASTNode *right = parse_term_expr(p);
+        expr = parser_create_binary_op_node(op, expr, right);
+    }
+
+    if (enclosed == true) {
+        parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close expression enclosure");
+    }
+
+    return expr;
 }

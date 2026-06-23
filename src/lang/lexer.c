@@ -27,10 +27,10 @@ const char* get_token_type_string(TokenType type) {
         case TOK_BANG_EQUAL: return "TOK_BANG_EQUAL";
         case TOK_LESS_EQUAL: return "TOK_LESS_EQUAL";
         case TOK_MORE_EQUAL: return "TOK_MORE_EQUAL";
-        case TOK_LPAREN: return "TOK_LEFT_PAREN";
-        case TOK_RPAREN: return "TOK_RIGHT_PAREN";
-        case TOK_LBRACE: return "TOK_LEFT_BRACE";
-        case TOK_RBRACE: return "TOK_RIGHT_BRACE";
+        case TOK_LPAREN: return "TOK_LPAREN";
+        case TOK_RPAREN: return "TOK_RPAREN";
+        case TOK_LBRACE: return "TOK_LBRACE";
+        case TOK_RBRACE: return "TOK_RBRACE";
         case TOK_SEMICOLON: return "TOK_SEMICOLON";
         case TOK_EOF: return "TOK_EOF";
         default: return "Unknown TokenType";
