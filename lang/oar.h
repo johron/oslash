@@ -779,9 +779,9 @@ ASTNode* parse_stmt(Parser *p) {
         case TOK_STR: {
             Token tok = parser_peek(p);
 
-            if (strcmp(tok.value.str_value, "fn") == false) { // fn x(...)
+            if (strcmp(tok.value.str_value, "fn") == 0) { // fn x(...)
                 return parse_func_decl_stmt(p);
-            } else if (strcmp(tok.value.str_value, "let") == false) { // let $x = ... (;)
+            } else if (strcmp(tok.value.str_value, "let") == 0) { // let $x = ... (;)
                 return parse_var_decl_stmt(p);
             } else { // treat as function call 
                 return parse_func_call_stmt(p);
@@ -1059,7 +1059,7 @@ void env_free(Env *env) {
 void env_set_var(Env *env, const char *name, RuntimeValue value) {
     for (Env *scope = env; scope; scope = scope->parent) {
         for (EnvEntry *e = scope->head; e; e = e->next) {
-            if (strcmp(e->name, name) == false) {
+            if (strcmp(e->name, name) == 0) {
                 if (e->type != ENTRY_VAR) {
                     fprintf(stderr, "Cannot redefine %s '%s' as variable\n", get_entry_type_string_pretty(e->type), name);
                     exit(1);
@@ -1083,7 +1083,7 @@ void env_set_var(Env *env, const char *name, RuntimeValue value) {
 void env_set_func(Env *env, const char *name, RuntimeFunc func) {
     for (Env *scope = env; scope; scope = scope->parent) {
         for (EnvEntry *e = scope->head; e; e = e->next) {
-            if (strcmp(e->name, name) == false) {
+            if (strcmp(e->name, name) == 0) {
                 if (e-> type != ENTRY_FUNC) {
                     fprintf(stderr, "Cannot redefine already defined %s '%s'\n", get_entry_type_string_pretty(e->type), name);
                     exit(1);
@@ -1106,7 +1106,7 @@ void env_set_func(Env *env, const char *name, RuntimeFunc func) {
 bool env_get_var(Env *env, const char *name, RuntimeValue *out) {
     for (Env *scope = env; scope; scope = scope->parent) {
         for (EnvEntry *e = scope->head; e; e = e->next) {
-            if (strcmp(e->name, name) == false) {
+            if (strcmp(e->name, name) == 0) {
                 if (e->type != ENTRY_VAR) {
                     fprintf(stderr, "Tried to reference variable as %s\n", get_entry_type_string_pretty(e->type));
                     exit(1);
@@ -1124,7 +1124,7 @@ bool env_get_var(Env *env, const char *name, RuntimeValue *out) {
 RuntimeFunc env_get_func(Env *env, const char *name) {
     for (Env *scope = env; scope; scope = scope->parent) {
         for (EnvEntry *e = scope->head; e; e = e->next) {
-            if (strcmp(e->name, name) == false) {
+            if (strcmp(e->name, name) == 0) {
                 if (e->type != ENTRY_FUNC) {
                     fprintf(stderr, "Tried to reference function as %s\n", get_entry_type_string_pretty(e->type));
                     exit(1);
@@ -1275,11 +1275,11 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
             Error left_err = {0};
             Error right_err = {0};
 
-            if (eval(ctx, node->data.binary_op.left, &left, &left_err) == false) {
+            if (eval(ctx, node->data.binary_op.left, &left, &left_err) == 0) {
                 *err = left_err;
                 return false;
             }
-            if (eval(ctx, node->data.binary_op.right, &right, &right_err) == false) {
+            if (eval(ctx, node->data.binary_op.right, &right, &right_err) == 0) {
                 *err = right_err;
                 return false;
             }
@@ -1288,13 +1288,29 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
 
             RuntimeValue result;
             if (op == '+' && (left.type == VAL_STR || right.type == VAL_STR)) {
-                char lbuf[64], rbuf[64];
-                const char *left_side = (left.type == VAL_STR) ? left.str_val : (snprintf(lbuf, sizeof lbuf,
-                    left.type == VAL_FLOAT ? "%g" : "%f",
-                    left.type == VAL_FLOAT ? left.float_val : left.num_val), lbuf);
-                const char *right_side = (right.type == VAL_STR) ? right.str_val : (snprintf(rbuf, sizeof rbuf,
-                    right.type == VAL_FLOAT ? "%g" : "%f",
-                    right.type == VAL_FLOAT ? right.float_val : right.num_val), rbuf);
+                const char *left_side;
+                char lbuf[64];
+                if (left.type == VAL_STR) {
+                    left_side = left.str_val;
+                } else if (left.type == VAL_FLOAT) {
+                    snprintf(lbuf, sizeof lbuf, "%g", left.float_val);
+                    left_side = lbuf;
+                } else {
+                    snprintf(lbuf, sizeof lbuf, "%ld", (long)left.num_val);
+                    left_side = lbuf;
+                }
+
+                const char *right_side;
+                char rbuf[64];
+                if (right.type == VAL_STR) {
+                    right_side = right.str_val;
+                } else if (right.type == VAL_FLOAT) {
+                    snprintf(rbuf, sizeof rbuf, "%g", right.float_val);
+                    right_side = rbuf;
+                } else {
+                    snprintf(rbuf, sizeof rbuf, "%ld", (long)right.num_val);
+                    right_side = rbuf;
+                }
                 
                 size_t len = strlen(left_side) + strlen(right_side) + 1;
                 char *buf = malloc(len);
@@ -1307,7 +1323,7 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
                 RuntimeValue v;
                 Error v_err;
 
-                if (eval_arith(op, left, right, &v, &v_err) == false) {
+                if (eval_arith(op, left, right, &v, &v_err) == 0) {
                     *err = v_err;
                     return false;
                 }
@@ -1326,7 +1342,7 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
             RuntimeValue v;
             Error v_err = {0};
 
-            if (eval(ctx, node->data.unary_op.operand, &v, &v_err) == false) {
+            if (eval(ctx, node->data.unary_op.operand, &v, &v_err) == 0) {
                 *err = v_err;
                 return false;
             }
