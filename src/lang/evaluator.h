@@ -11,19 +11,27 @@ typedef enum {
     ENTRY_FUNC,
 } EntryType;
 
-inline const char* get_entry_type_string(EntryType type) {
+static inline const char* get_entry_type_string(EntryType type) {
     switch (type) {
-        ENTRY_VAR: return "ENTRY_VAR";
-        ENTRY_FUNC: return "ENTRY_FUNC";
+        case ENTRY_VAR: return "ENTRY_VAR";
+        case ENTRY_FUNC: return "ENTRY_FUNC";
+        default: {
+            fprintf(stderr, "Unrecognized entry type '%d'\n", type);
+            exit(1);
+        }
     }
-}
+};
 
-inline const char* get_entry_type_string_pretty(EntryType type) {
+static inline const char* get_entry_type_string_pretty(EntryType type) {
     switch (type) {
-        ENTRY_VAR: return "variable";
-        ENTRY_FUNC: return "function";
+        case ENTRY_VAR: return "variable";
+        case ENTRY_FUNC: return "function";
+        default: {
+            fprintf(stderr, "Unrecognized entry type '%d'\n", type);
+            exit(1);
+        }
     }
-}
+};
 
 typedef enum {
     VAL_NUM,
@@ -57,7 +65,7 @@ static inline RuntimeValue val_void() {
 
 RuntimeValue val_str(const char *s);
 void val_free(RuntimeValue *v);
-static RuntimeValue val_clone(RuntimeValue v);
+RuntimeValue val_clone(RuntimeValue v);
 
 typedef struct EnvEntry EnvEntry;
 typedef struct Env Env;
@@ -96,6 +104,6 @@ void ctx_free(EvalCtx *ctx);
 RuntimeValue eval(EvalCtx *ctx, ASTNode *node);
 RuntimeValue eval_arith(char op, RuntimeValue left, RuntimeValue right);
 
-static RuntimeValue builtin_echo(RuntimeValue *args, size_t argc);
+RuntimeValue builtin_echo(RuntimeValue *args, size_t argc);
 
 #endif

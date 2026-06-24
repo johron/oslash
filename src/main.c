@@ -44,11 +44,9 @@ int main() {
                 }
             }
 
-            for (int i = 0; i < size; i++) {
-                if (&nodes[i] != NULL) {
-                    RuntimeValue value = eval(ctx, &nodes[i]);
-                    parser_free_ast(&nodes[i]);
-                }
+            for (size_t i = 0; i < size; i++) {
+                /*RuntimeValue value = */eval(ctx, &nodes[i]);
+                parser_free_ast(&nodes[i]);
             }
 
             free_tok_array(&tok_array);

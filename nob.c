@@ -23,6 +23,7 @@ int main(int argc, char **argv)
         "src/lang/evaluator.c",
         "-o",
         "build/oar",
+        "-O2",
     );
 
     if (!nob_cmd_run_sync(cmd)) {

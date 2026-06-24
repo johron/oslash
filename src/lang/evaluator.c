@@ -18,7 +18,7 @@ void val_free(RuntimeValue *v) {
     }
 }
 
-static RuntimeValue val_clone(RuntimeValue v) {
+RuntimeValue val_clone(RuntimeValue v) {
     if (v.type == VAL_STR && v.str_val)
         return val_str(v.str_val);
     return v;
@@ -219,10 +219,10 @@ RuntimeValue eval(EvalCtx *ctx, ASTNode *node) {
             if (op == '+' && (left.type == VAL_STR || right.type == VAL_STR)) {
                 char lbuf[64], rbuf[64];
                 const char *left_side = (left.type == VAL_STR) ? left.str_val : (snprintf(lbuf, sizeof lbuf,
-                    left.type == VAL_FLOAT ? "%g" : "%d",
+                    left.type == VAL_FLOAT ? "%g" : "%f",
                     left.type == VAL_FLOAT ? left.float_val : left.num_val), lbuf);
                 const char *right_side = (right.type == VAL_STR) ? right.str_val : (snprintf(rbuf, sizeof rbuf,
-                    right.type == VAL_FLOAT ? "%g" : "%d",
+                    right.type == VAL_FLOAT ? "%g" : "%f",
                     right.type == VAL_FLOAT ? right.float_val : right.num_val), rbuf);
                 
                 size_t len = strlen(left_side) + strlen(right_side) + 1;
@@ -313,7 +313,7 @@ RuntimeValue eval(EvalCtx *ctx, ASTNode *node) {
     }
 }
 
-static RuntimeValue builtin_echo(RuntimeValue *args, size_t argc) {
+RuntimeValue builtin_echo(RuntimeValue *args, size_t argc) {
     for (size_t i = 0; i < argc; i++) {
         if (i > 0) printf(" ");
         
