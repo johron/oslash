@@ -54,37 +54,41 @@ void env_free(Env *env) {
 }
 
 void env_set_var(Env *env, const char *name, RuntimeValue value) {
-    for (EnvEntry *e = env->head; e; e = e->next) {
-        if (strcmp(e->name, name) == false) {
-            if (e->type != ENTRY_VAR) {
-                fprintf(stderr, "Cannot redefine %s '%s' as variable\n", get_entry_type_string_pretty(e->type), name);
-                exit(1);
-            }
+    for (Env *scope = env; scope; scope = scope->parent) {
+        for (EnvEntry *e = scope->head; e; e = e->next) {
+            if (strcmp(e->name, name) == false) {
+                if (e->type != ENTRY_VAR) {
+                    fprintf(stderr, "Cannot redefine %s '%s' as variable\n", get_entry_type_string_pretty(e->type), name);
+                    exit(1);
+                }
 
-            val_free(&e->value); // TODO: implement val_free
-            e->value = val_clone(value);
-            return;
+                val_free(&e->value); // TODO: implement val_free
+                e->value = val_clone(value);
+                return;
+            }
         }
     }
 
     EnvEntry *entry = malloc(sizeof(EnvEntry));
-    entry->type = ENTRY_VAR;
     entry->name = strdup(name);
+    entry->type = ENTRY_VAR;
     entry->value = val_clone(value);
     entry->next = env->head;
     env->head = entry;
 }
 
 void env_set_func(Env *env, const char *name, RuntimeFunc func) {
-    for (EnvEntry *e = env->head; e; e = e->next) {
-        if (strcmp(e->name, name) == false) {
-            if (e-> type != ENTRY_FUNC) {
-                fprintf(stderr, "Cannot redefine already defined %s '%s'\n", get_entry_type_string_pretty(e->type), name);
+    for (Env *scope = env; scope; scope = scope->parent) {
+        for (EnvEntry *e = scope->head; e; e = e->next) {
+            if (strcmp(e->name, name) == false) {
+                if (e-> type != ENTRY_FUNC) {
+                    fprintf(stderr, "Cannot redefine already defined %s '%s'\n", get_entry_type_string_pretty(e->type), name);
+                    exit(1);
+                }
+
+                fprintf(stderr, "Cannot redefine already defined function '%s\n", name);
                 exit(1);
             }
-
-            fprintf(stderr, "Cannot redefine already defined function '%s\n", name);
-            exit(1);
         }
     }
 
@@ -99,7 +103,7 @@ void env_set_func(Env *env, const char *name, RuntimeFunc func) {
 bool env_get_var(Env *env, const char *name, RuntimeValue *out) {
     for (Env *scope = env; scope; scope = scope->parent) {
         for (EnvEntry *e = scope->head; e; e = e->next) {
-            if (strcmp(e->name, name) == 0) {
+            if (strcmp(e->name, name) == false) {
                 if (e->type != ENTRY_VAR) {
                     fprintf(stderr, "Tried to reference variable as %s\n", get_entry_type_string_pretty(e->type));
                     exit(1);
@@ -110,6 +114,7 @@ bool env_get_var(Env *env, const char *name, RuntimeValue *out) {
             }
         }
     }
+
     return false;
 }
 

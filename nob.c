@@ -22,7 +22,7 @@ int main(int argc, char **argv)
         "src/lang/parser.c",
         "src/lang/evaluator.c",
         "-o",
-        "build/oar"
+        "build/oar",
     );
 
     if (!nob_cmd_run_sync(cmd)) {

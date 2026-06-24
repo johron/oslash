@@ -104,6 +104,10 @@ ASTNode* parse_func_decl_stmt(Parser *p);
 ASTNode* parse_func_call_stmt(Parser *p);
 
 ASTNode* parse_block(Parser *l);
+
+void parser_init_block(Block *block);
+void parser_block_push_node(Block *block, ASTNode *node);
+
 ASTNode* parser_create_member_node(NodeType type, TokenValue value);
 ASTNode* parser_create_binary_op_node(char op, ASTNode *left, ASTNode *right);
 ASTNode* parser_create_unary_op_node(char op, ASTNode *operand);
