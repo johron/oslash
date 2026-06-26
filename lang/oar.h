@@ -301,13 +301,13 @@ void entry_free(EnvEntry *entry);
 typedef struct {
     Env          *env;
 #ifdef OAR_USE_EXTERNAL_FUNCTION_SOURCE
-    RuntimeFunc (*env_get_func_external)(Env *env, const char *name);
+    bool (*try_run_func_external)(Env *env, const char *name, RuntimeValue *args, size_t argc);
 #endif
 } EvalCtx;
 
 EvalCtx *ctx_new(
     #ifdef OAR_USE_EXTERNAL_FUNCTION_SOURCE
-        RuntimeFunc (*env_get_func_external)(Env *env, const char *name)
+        bool (*try_run_func_external)(Env *env, const char *name, RuntimeValue *args, size_t argc)
     #else
         void
     #endif
@@ -803,7 +803,7 @@ bool parse_stmt(Parser *p, ASTNode *out, Error *err) {
             Token tok = parser_peek(p);
 
             if (strcmp(tok.value.str_value, "fn") == 0) { // fn x(...)
-                fprintf(stderr, "Convert parse_func_decl_stmt() to new error system\n");
+                fprintf(stderr, "Convert parse_func_decl_stmt() to new error system, also implement function declarations in parser and eval\n");
                 exit(1);
                 //return parse_func_decl_stmt(p);
             } else if (strcmp(tok.value.str_value, "let") == 0) { // let $x = ... (;)
@@ -1163,7 +1163,7 @@ RuntimeFunc env_get_func(Env *env, const char *name) {
 
 EvalCtx *ctx_new(
     #ifdef OAR_USE_EXTERNAL_FUNCTION_SOURCE
-        RuntimeFunc (*env_get_func_external)(Env *env, const char *name)
+        bool (*try_run_func_external)(Env *env, const char *name, RuntimeValue *args, size_t argc)
     #else
         void
     #endif
@@ -1172,7 +1172,9 @@ EvalCtx *ctx_new(
     ctx->env      = env_new(NULL);
 
     #ifdef OAR_USE_EXTERNAL_FUNCTION_SOURCE
-    ctx->env_get_func_external = env_get_func_external;
+    if (try_run_func_external != NULL) {
+        ctx->try_run_func_external = try_run_func_external;
+    }
     #endif
 
     env_set_func(ctx->env, "echo", builtin_echo);
@@ -1424,11 +1426,8 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
                 result = func(args, argc);
             } else {
                 #ifdef OAR_USE_EXTERNAL_FUNCTION_SOURCE
-                RuntimeFunc extern_func = ctx->env_get_func_external(ctx->env, name);
-                if (extern_func != NULL) {
-                    result = extern_func(args, argc);
-                } else {
-                    *err = mkerr("runtime", "unknown function '%s'", name);
+                bool extern_func = ctx->try_run_func_external(ctx->env, name, args, argc);
+                if (!extern_func) {
                     return false;
                 }
                 #else

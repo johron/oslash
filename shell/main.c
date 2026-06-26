@@ -5,6 +5,13 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
+#include <unistd.h>
+#include <spawn.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 bool exec_input(EvalCtx *ctx, char* input, Error *err) {
     Lexer lexer = {
@@ -71,15 +78,111 @@ void repl(EvalCtx *ctx) {
 
             Error err = {0};
             if (exec_input(ctx, buffer, &err) == false) {
-                fprintf(stderr, "oar: %s: %s\n", err.type, err.message);
+                if (&err != NULL && err.message != NULL && err.type != NULL) {
+                    fprintf(stderr, "oar: %s: %s\n", err.type, err.message);
+                }
                 free(err.message);
             }
         }
     }
 }
 
-RuntimeFunc env_get_func_external(Env *env, const char *name) {
+// Source - https://stackoverflow.com/a/4771038
+// Posted by T.J. Crowder, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-06-26, License - CC BY-SA 4.0
+bool startsWith(const char *pre, const char *str){
+    size_t lenpre = strlen(pre),
+           lenstr = strlen(str);
+    return lenstr < lenpre ? false : memcmp(pre, str, lenpre) == 0;
+}
+
+int is_regular_file(const char *path) {
+    struct stat path_stat;
+    
+    if (stat(path, &path_stat) != 0) {
+        return -1; 
+    }
+    
+    return S_ISREG(path_stat.st_mode);
+}
+
+extern char **environ;
+
+int spawn_program(char* name, char* path, RuntimeValue *args, size_t argc) {
+    printf("%s, %s\n", name, path);
+    // is it a file?, if so then spawn
+
+    // convert runtime value args to strings
+
+    int result = is_regular_file(path);
+    if (result == 1) {
+        printf("it's a file\n");
+
+        pid_t pid;
+        char *argv[] = {name /*, stringed_args*/, NULL};
+
+        int status = posix_spawn(&pid, path, NULL, NULL, argv, environ);
+
+        if (status == 0) {
+            printf("Spawned process with pid '%d'\n", pid);
+            waitpid(pid, &status, 0);
+            return 0;
+        } else {
+            //perror(sprintf("oar: %s", name));
+            fprintf(stderr, "oar: %s: %s\n", name, strerror(errno));
+        }
+
+        return 1; // return error code of spawned process?
+    } else if (result == 0) {
+        fprintf(stderr, "oar: runtime: '%s' is directory\n", path);
+        return 1;
+    } else {
+        fprintf(stderr, "oar: runtime: '%s' does not exist\n", path);
+        return 1;
+    }
+}
+
+bool try_run_func_external(Env *env, const char *name, RuntimeValue *args, size_t argc) {
     // Try to spawn `name` as program from path...
+
+    char path[PATH_MAX];
+
+    if (startsWith("/", name) == true) { // absolute
+        strcpy(path, name);
+        printf("path: '%s'\n", path);
+        if (spawn_program(name, path, args, argc) != 0) { // TODO: maybe prettify name in spawn program, so /bin/.../program becomes program or something..
+            return false;
+        }
+
+        return true;
+    } else if (startsWith("./", name) == true) { // relative
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            if (strlen(name) > 0) {
+                char* old_name[strlen(name)];
+                strcpy(old_name, name);
+
+                memmove(name, name + 2, strlen(name));
+                snprintf(path, sizeof(path), "%s/%s", cwd, name);
+                
+                printf("path: '%s'\n", path);
+                if (spawn_program(old_name, path, args, argc) != 0) {
+                    return false;
+                }
+
+                return true;
+            } else {
+                fprintf(stderr, "oar: runtime: string is too short, I don't think this should happen\n");
+                return false;
+            }
+        } else {
+            fprintf(stderr, "oar: runtime: could not get current working directory\n");
+            return false;
+        }
+    } else { // not a path
+            fprintf(stderr, "oar: runtime: non path env_get_func_external not implemented yet\n");
+            return false;
+    }
 
     // Plan
     // * First check if the name starts with / or ./ (also need to fix the lexer to support these as strings), also need to make lexer make basically anything into a string
@@ -87,11 +190,12 @@ RuntimeFunc env_get_func_external(Env *env, const char *name) {
     // * else path resolver, checks the path for `name` and runs that
     // * else error 
 
-    return NULL;
+    fprintf(stderr, "oar: runtime: unknown function '%s'", name);
+    return false;
 }
 
 int main() {
-    EvalCtx *ctx = ctx_new(env_get_func_external);
+    EvalCtx *ctx = ctx_new(try_run_func_external);
 
     repl(ctx);
     
