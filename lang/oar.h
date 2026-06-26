@@ -46,12 +46,10 @@ typedef enum {
     TOK_LESS,
     TOK_MORE,
     TOK_BANG,
-    TOK_COMMA,
     TOK_PIPE,
     TOK_DOLLAR,
     TOK_ARROW,
 
-    TOK_DB_COLON,
     TOK_DB_MORE,
     TOK_DB_EQUAL,
     TOK_BANG_EQUAL,
@@ -381,11 +379,9 @@ const char* get_token_type_string(TokenType type) {
         case TOK_LESS: return "TOK_LESS";
         case TOK_MORE: return "TOK_MORE";
         case TOK_BANG: return "TOK_BANG";
-        case TOK_COMMA: return "TOK_COMMA";
         case TOK_PIPE: return "TOK_PIPE";
         case TOK_DOLLAR: return "TOK_DOLLAR";
         case TOK_ARROW: return "TOK_ARROW";
-        case TOK_DB_COLON: return "TOK_DB_COLON";
         case TOK_DB_MORE: return "TOK_DB_MORE";
         case TOK_DB_EQUAL: return "TOK_DB_EQUAL";
         case TOK_BANG_EQUAL: return "TOK_BANG_EQUAL";
@@ -580,17 +576,7 @@ bool lexer_next_token(Lexer *l, Token *out, Error *err) {
                 *out = (Token) { .type = TOK_BANG }; return true;
             }
         };
-        case ':': {
-            if (lexer_peek(l) == ':') {
-                lexer_advance(l);
-                *out = (Token) { .type = TOK_DB_COLON }; return true;
-            }
-
-            *err = mkerr("lexer", "unexpected ':'");
-            return false;
-        }
         
-        case ',': *out = (Token) { .type = TOK_COMMA }; return true;
         case '|': *out = (Token) { .type = TOK_PIPE }; return true;
         case '$': *out = (Token) { .type = TOK_DOLLAR }; return true;
  
@@ -855,32 +841,16 @@ bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err) {
     Block args;
     if (parser_init_block(&args, err) == false) return false;
 
-    if (parser_peek(p).type == TOK_DB_COLON) {
-        parser_advance(p);
-        if (parser_expect(p, TOK_LPAREN, "Expected '('", &trash, err) == false) return false;
-
-        while (parser_peek(p).type != TOK_RPAREN) {
-            ASTNode *expr = malloc(sizeof(ASTNode));
+    while (parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_SEMICOLON) {
+        ASTNode *expr = malloc(sizeof(ASTNode));
+        if (parser_peek(p).type == TOK_LPAREN) {
+            parser_advance(p);
             if (parse_expr(p, expr, err) == false) return false;
-
-            if (parser_peek(p).type != TOK_RPAREN) {
-                if (parser_expect(p, TOK_COMMA, "Expected ','", &trash, err) == false) return false;
-            }
-            parser_block_push_node(&args, expr);
+            if (parser_expect(p, TOK_RPAREN, "Expected ')'", &trash, err) == false) return false;
+        } else {
+            if (parse_unary_expr(p, expr, err) == false) return false;
         }
-        if (parser_expect(p, TOK_RPAREN, "Expected ')'", &trash, err) == false) return false;
-    } else {
-        while (parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_SEMICOLON) {
-            ASTNode *expr = malloc(sizeof(ASTNode));
-            if (parser_peek(p).type == TOK_LPAREN) {
-                parser_advance(p);
-                if (parse_expr(p, expr, err) == false) return false;
-                if (parser_expect(p, TOK_RPAREN, "Expected ')'", &trash, err) == false) return false;
-            } else {
-                if (parse_unary_expr(p, expr, err) == false) return false;
-            }
-            parser_block_push_node(&args, expr);
-        }
+        parser_block_push_node(&args, expr);
     }
 
     if (parser_peek(p).type != TOK_EOF) {
