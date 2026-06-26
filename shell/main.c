@@ -11,7 +11,13 @@ bool exec_input(EvalCtx *ctx, char* input, Error *err) {
         .src = input,
         .pos = 0,
     };
-    TokenArray tok_array = lex_all(&lexer);
+    TokenArray tok_array;
+    Error tok_arr_err = {0};
+    
+    if (lex_all(&lexer, &tok_array, &tok_arr_err) == false) {
+        *err = tok_arr_err;
+        return false;
+    } 
 
     Parser parser = {
         .tok_array = tok_array,
@@ -23,14 +29,18 @@ bool exec_input(EvalCtx *ctx, char* input, Error *err) {
     ASTNode *nodes = malloc(cap * sizeof(ASTNode));
 
     while (parser.pos < parser.tok_array.size && parser_peek(&parser).type != TOK_EOF && parser_peek(&parser).type != TOK_RBRACE) {
-        ASTNode *node = parse_stmt(&parser);
-        if (node != NULL) {
+        ASTNode node;
+        if (parse_stmt(&parser, &node, err) == false) {
+            return false;
+        }
+
+        if (&node != NULL) {
             if (size >= cap) {
                 cap *= 2;
                 nodes = realloc(nodes, cap * sizeof(ASTNode));
             }
 
-            nodes[size++] = *node;
+            nodes[size++] = node;
         }
     }
 

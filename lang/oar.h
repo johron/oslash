@@ -19,6 +19,16 @@ typedef struct {
 
 Error mkerr(char* type, char* message, ...);
 
+//typedef enum {
+//    RES_OK,
+//    RES_ERR
+//} ResultTag;
+//
+//typedef struct {
+//    ResultTag tag;
+//    char message[256];
+//} Result;
+
 /* Lexer */
 
 typedef enum {
@@ -83,7 +93,7 @@ typedef struct {
 
 const char* get_token_type_string(TokenType type);
 
-TokenArray lex_all(Lexer *l);
+bool lex_all(Lexer *l, TokenArray *out, Error *err);
 void free_tok_array(TokenArray *a);
 
 /* Parser */
@@ -121,7 +131,7 @@ static inline char* get_node_type_string(NodeType type) {
         case NODE_VALUE_STRING: return "NODE_VALUE_STRING";
         case NODE_VALUE_VAR_REF: return "NODE_VALUE_VAR_REF";
         default: {
-            return NULL;
+            return "Unknown NodeType";
         }
     }
 };
@@ -178,30 +188,29 @@ struct ASTNode {
     } data;
 };
 
-ASTNode* parse_stmt(Parser *p);
+bool parse_stmt(Parser *p, ASTNode *out, Error *err);
 
-ASTNode* parse_var_decl_stmt(Parser *p);
+bool parse_var_decl_stmt(Parser *p, ASTNode *out, Error *err);
 ASTNode* parse_func_decl_stmt(Parser *p);
-ASTNode* parse_func_call_stmt(Parser *p);
+bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err);
 
-ASTNode* parse_block(Parser *l);
+bool parse_block(Parser *p, ASTNode *out, Error *err);
 
-void parser_init_block(Block *block);
+bool parser_init_block(Block *block, Error *err);
 void parser_block_push_node(Block *block, ASTNode *node);
 
 ASTNode* parser_create_member_node(NodeType type, TokenValue value);
 ASTNode* parser_create_binary_op_node(char op, ASTNode *left, ASTNode *right);
-ASTNode* parser_create_unary_op_node(char op, ASTNode *operand);
+bool parser_create_unary_op_node(char op, ASTNode *operand, ASTNode *out, Error *err);
 
 Token parser_peek(Parser *p);
 Token parser_advance(Parser *p);
-Token parser_expect(Parser *p, TokenType type, const char *message);
+bool parser_expect(Parser *p, TokenType type, const char *message, Token *out, Error *err);
 
-ASTNode* parse_expr(Parser *p);
-ASTNode* parse_term_expr(Parser *p);
-ASTNode* parse_unary_expr(Parser *p);
-ASTNode* parse_primary_expr(Parser *p);
-
+bool parse_expr(Parser *p, ASTNode *out, Error *err);
+bool parse_term_expr(Parser *p, ASTNode *out, Error *err);
+bool parse_unary_expr(Parser *p, ASTNode *out, Error *err);
+bool parse_primary_expr(Parser *p, ASTNode *out, Error *err);
 
 void parser_free_ast(ASTNode *node);
 
@@ -216,10 +225,7 @@ static inline const char* get_entry_type_string(EntryType type) {
     switch (type) {
         case ENTRY_VAR: return "ENTRY_VAR";
         case ENTRY_FUNC: return "ENTRY_FUNC";
-        default: {
-            fprintf(stderr, "Unrecognized entry type '%d'\n", type);
-            exit(1);
-        }
+        default: return "Unknown EntryType";
     }
 };
 
@@ -227,10 +233,7 @@ static inline const char* get_entry_type_string_pretty(EntryType type) {
     switch (type) {
         case ENTRY_VAR: return "variable";
         case ENTRY_FUNC: return "function";
-        default: {
-            fprintf(stderr, "Unrecognized entry type '%d'\n", type);
-            exit(1);
-        }
+        default: return "Unknown EntryType";
     }
 };
 
@@ -410,7 +413,7 @@ void lexer_skip_ws(Lexer *l) {
     while (isspace(lexer_peek(l))) lexer_advance(l);
 }
 
-Token lexer_next_token(Lexer *l) {
+bool lexer_next_token(Lexer *l, Token *out, Error *err) {
     lexer_skip_ws(l);
 
     char c = lexer_peek(l);
@@ -431,20 +434,22 @@ Token lexer_next_token(Lexer *l) {
                 place *= 0.1f;
             }
 
-            return (Token){
+            *out = (Token){
                 .type = TOK_FLOAT,
                 .value = {
                     .float_value = num + decimal,
                 }
             };
+            return true;
         }
 
-        return (Token){
+        *out = (Token){
             .type = TOK_NUM,
             .value = {
                 .num_value = num,
             }
         };
+        return true;
     }
 
 
@@ -459,8 +464,9 @@ Token lexer_next_token(Lexer *l) {
                 char *next_str = realloc(str, cap);
                 if (next_str == NULL) {
                     free(str);
-                    fprintf(stderr, "Error: out of memory");
-                    exit(1);                    
+
+                    *err = mkerr("lexer", "could not reallocate string");
+                    return false;
                 }
                 str = next_str;
             }
@@ -471,12 +477,13 @@ Token lexer_next_token(Lexer *l) {
 
         str[i] = '\0';
 
-        return (Token){
+        *out = (Token){
             .type = TOK_STR,
             .value = {
                 .str_value = str,
             }
         };
+        return true;
     }
 
     if (c == '"') {
@@ -492,8 +499,8 @@ Token lexer_next_token(Lexer *l) {
                 char *next_str = realloc(str, cap);
                 if (next_str == NULL) {
                     free(str);
-                    fprintf(stderr, "Error: out of memory\n");
-                    exit(1);                    
+                    *err = mkerr("lexer", "could not reallocate string");
+                    return false;
                 }
                 str = next_str;
             }
@@ -507,106 +514,111 @@ Token lexer_next_token(Lexer *l) {
             lexer_advance(l);
         } else {
             free(str);
-            fprintf(stderr, "Error: missing '\"' to close string\n");
-            exit(1);
+            *err = mkerr("lexer", "missing '\"' to close string");
+            return false;
         }
 
-        return (Token){
+        *out = (Token){
             .type = TOK_STR,
             .value = {
                 .str_value = str,
             }
         };
+        return true;
     }
 
     lexer_advance(l);
 
     switch (c) {
-        case '+': return (Token) { .type = TOK_PLUS };
-        case '*': return (Token) { .type = TOK_STAR };
-        case '/': return (Token) { .type = TOK_SLASH };
-        case '%': return (Token) { .type = TOK_PERCENT };
+        case '+': *out = (Token) { .type = TOK_PLUS }; return true;
+        case '*': *out = (Token) { .type = TOK_STAR }; return true;
+        case '/': *out = (Token) { .type = TOK_SLASH }; return true;
+        case '%': *out = (Token) { .type = TOK_PERCENT }; return true;
 
         case '-': {
             if (lexer_peek(l) == '>') {
                 lexer_advance(l);
-                return (Token) { .type = TOK_ARROW };
+                *out = (Token) { .type = TOK_ARROW };
+                return true;
             } else {
-                return (Token) { .type = TOK_MINUS};
+                *out = (Token) { .type = TOK_MINUS};
+                return true;
             }
         };
         case '=': {
             if (lexer_peek(l) == '=') {
                 lexer_advance(l);
-                return (Token) { .type = TOK_DB_EQUAL };
+                *out = (Token) { .type = TOK_DB_EQUAL }; return true;
             } else {
-                return (Token) { .type = TOK_EQUAL };
+                *out = (Token) { .type = TOK_EQUAL }; return true;
             }
         };
         case '<': {
             if (lexer_peek(l) == '=') {
                 lexer_advance(l);
-                return (Token) { .type = TOK_LESS_EQUAL };
+                *out = (Token) { .type = TOK_LESS_EQUAL }; return true;
             } else {
-                return (Token) { .type = TOK_LESS };
+                *out = (Token) { .type = TOK_LESS }; return true;
             }
         };
         case '>': {
             if (lexer_peek(l) == '=') {
                 lexer_advance(l);
-                return (Token) { .type = TOK_MORE_EQUAL };
+                *out = (Token) { .type = TOK_MORE_EQUAL }; return true;
             } else if (lexer_peek(l) == '>') {
                 lexer_advance(l);
-                return (Token) { .type = TOK_DB_MORE };
+                *out = (Token) { .type = TOK_DB_MORE }; return true;
             } else {
-                return (Token) { .type = TOK_MORE };
+                *out = (Token) { .type = TOK_MORE }; return true;
             }
         };
         case '!': {
             if (lexer_peek(l) == '=') {
                 lexer_advance(l);
-                return (Token) { .type = TOK_BANG_EQUAL };
+                *out = (Token) { .type = TOK_BANG_EQUAL }; return true;
             } else {
-                return (Token) { .type = TOK_BANG };
+                *out = (Token) { .type = TOK_BANG }; return true;
             }
         };
         case ':': {
             if (lexer_peek(l) == ':') {
                 lexer_advance(l);
-                return (Token) { .type = TOK_DB_COLON };
+                *out = (Token) { .type = TOK_DB_COLON }; return true;
             }
 
-            fprintf(stderr, "Unexpected ':'\n");
-            exit(1);
+            *err = mkerr("lexer", "unexpected ':'");
+            return false;
         }
         
-        case ',': return (Token) { .type = TOK_COMMA };
-        case '|': return (Token) { .type = TOK_PIPE };
-        case '$': return (Token) { .type = TOK_DOLLAR };
+        case ',': *out = (Token) { .type = TOK_COMMA }; return true;
+        case '|': *out = (Token) { .type = TOK_PIPE }; return true;
+        case '$': *out = (Token) { .type = TOK_DOLLAR }; return true;
  
-        case '(': return (Token) { .type = TOK_LPAREN };
-        case ')': return (Token) { .type = TOK_RPAREN };
-        case '{': return (Token) { .type = TOK_LBRACE };
-        case '}': return (Token) { .type = TOK_RBRACE };
+        case '(': *out = (Token) { .type = TOK_LPAREN }; return true;
+        case ')': *out = (Token) { .type = TOK_RPAREN }; return true;
+        case '{': *out = (Token) { .type = TOK_LBRACE }; return true;
+        case '}': *out = (Token) { .type = TOK_RBRACE }; return true;
 
-        case ';': return (Token){ .type = TOK_SEMICOLON };
-        case '\0': return (Token){ .type = TOK_EOF };
+        case ';': *out = (Token){ .type = TOK_SEMICOLON }; return true;
+        case '\0': *out = (Token){ .type = TOK_EOF }; return true;
 
         default:
-            printf("Unknown character: '%c'\n", c);
-            exit(1);
+            *err = mkerr("lexer", "unknown character '%c'", c);
+            return false;
     }
 }
 
-void init_tok_array(TokenArray *a) {
+bool init_tok_array(TokenArray *a, Error *err) {
     a->size = 0;
     a->cap = 32;
     a->data = malloc(a->cap * sizeof(Token));
 
     if (a->data == NULL) {
-        fprintf(stderr, "Could not allocate memory for token array data");
-        exit(1);
+        *err = mkerr("lexer", "could not allocate memory for token array data");
+        return false;
     }
+
+    return true;
 }
 
 void push_token(TokenArray *a, Token t) {
@@ -618,19 +630,27 @@ void push_token(TokenArray *a, Token t) {
     a->data[a->size++] = t;
 }
 
-TokenArray lex_all(Lexer *l) {
+bool lex_all(Lexer *l, TokenArray *out, Error *err) {
     TokenArray arr;
-    init_tok_array(&arr);
+
+    if (init_tok_array(&arr, err) == false) {
+        return false;
+    }
 
     while (true) {
-        Token t = lexer_next_token(l);
+        Token t;
+        if (lexer_next_token(l, &t, err) == false) {
+            return false;
+        }
+
         push_token(&arr, t);
 
         if (t.type == TOK_EOF)
             break;
     }
 
-    return arr;
+    *out = arr;
+    return true;
 }
 
 void free_tok_array(TokenArray *a) {
@@ -659,15 +679,17 @@ void free_tok_array(TokenArray *a) {
 
 /* Parser */
 
-void parser_init_block(Block *block) {
+bool parser_init_block(Block *block, Error *err) {
     block->size = 0;
     block->cap = 32;
     block->nodes = malloc(block->cap * sizeof(ASTNode));
 
     if (block->nodes == NULL) {
-        fprintf(stderr, "Could not allocate memory for nodes in block");
-        exit(1);
+        *err = mkerr("parser", "could not allocate memory for nodes in block");
+        return false;
     }
+
+    return true;
 }
 
 void parser_block_push_node(Block *block, ASTNode *node) {
@@ -679,12 +701,20 @@ void parser_block_push_node(Block *block, ASTNode *node) {
     block->nodes[block->size++] = *node;
 }
 
-ASTNode* parse_block(Parser *p) {
+bool parse_block(Parser *p, ASTNode *out, Error *err) {
     Block block;
-    parser_init_block(&block);
+
+    if (parser_init_block(&block, err) == false) {
+        return false;
+    }
 
     while (p->pos < p->tok_array.size && parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_RBRACE) {
-        ASTNode *node = parse_stmt(p);
+        ASTNode *node;
+
+        if (parse_stmt(p, node, err) == false) {
+            return false;
+        }
+
         if (node != NULL) {
             parser_block_push_node(&block, node);
         }
@@ -710,12 +740,14 @@ Token parser_advance(Parser *p) {
     return p->tok_array.data[p->pos - 1];
 }
 
-Token parser_expect(Parser *p, TokenType type, const char *message) {
+bool parser_expect(Parser *p, TokenType type, const char *message, Token *out, Error *err) {
     if (parser_peek(p).type == type) {
-        return parser_advance(p);
+        *out = parser_advance(p);
+        return true;
     }
-    fprintf(stderr, "Parser Error: %s, got %s\n", message, get_token_type_string(parser_peek(p).type));
-    exit(1);
+
+    *err = mkerr("parser", "%s, got %s", message, get_token_type_string(parser_peek(p).type));
+    return false;
 }
 
 void parser_free_ast(ASTNode *node) {
@@ -757,24 +789,25 @@ ASTNode* parser_create_binary_op_node(char op, ASTNode *left, ASTNode *right) {
     return node;
 }
 
-ASTNode* parser_create_unary_op_node(char op, ASTNode *operand) {
+bool parser_create_unary_op_node(char op, ASTNode *operand, ASTNode *out, Error *err) {
     ASTNode *node = (ASTNode*)malloc(sizeof(ASTNode));
     if (!node) {
-        fprintf(stderr, "Parser Error: Allocation failed for unary node.\n");
-        exit(1);
+        *err = mkerr("parser", "allocation failed for unary node");
+        return false;
     }
     
     node->type = NODE_UNARY_OP;
     node->data.unary_op.op = op;
     node->data.unary_op.operand = operand;
     
-    return node;
+    *out = *node;
+    return true;
 }
 
 
-ASTNode* parse_stmt(Parser *p);
+//bool parse_stmt(Parser *p, ASTNode *out, Error *err);
 
-ASTNode* parse_stmt(Parser *p) {
+bool parse_stmt(Parser *p, ASTNode *out, Error *err) {
     switch (p->tok_array.data[p->pos].type) {
         case TOK_STR: {
             Token tok = parser_peek(p);
@@ -782,39 +815,44 @@ ASTNode* parse_stmt(Parser *p) {
             if (strcmp(tok.value.str_value, "fn") == 0) { // fn x(...)
                 return parse_func_decl_stmt(p);
             } else if (strcmp(tok.value.str_value, "let") == 0) { // let $x = ... (;)
-                return parse_var_decl_stmt(p);
+                if (parse_var_decl_stmt(p, out, err) == false) return false;
             } else { // treat as function call 
-                return parse_func_call_stmt(p);
+                if (parse_func_call_stmt(p, out, err) == false) return false;
             }
 
-            printf("parse_stmt() is unimplemented for TOK_STR\n");
-            exit(1);
+            return true;
         };
         case TOK_LPAREN: { // statement enclosure
             parser_advance(p);
-            ASTNode *stmt = parse_stmt(p);
-            parser_expect(p, TOK_RPAREN, "Expected parenthesis to close statement enclosure");
-            return stmt;
+            if (parse_stmt(p, out, err) == false) return false;
+            if (parser_expect(p, TOK_RPAREN, "Expected parenthesis to close statement enclosure", out, err) == false) return false;
+            return true;
         };
         default: { // TODO: add some expression statement stuff somewhere here
-            fprintf(stderr, "Unexpected tokens found while parsing statement, got %s\n", get_token_type_string(p->tok_array.data[p->pos].type));
-            exit(1);
+            *err = mkerr("parser", "unexpected tokens found while parsing statement, got '%s'", get_token_type_string(p->tok_array.data[p->pos].type));
+            return false;
         };
     }
 }
 
-ASTNode* parse_var_decl_stmt(Parser *p) {
+bool parse_var_decl_stmt(Parser *p, ASTNode *out, Error *err) {
     ASTNode *node = malloc(sizeof(ASTNode));
 
-    parser_expect(p, TOK_STR, "Expected let keyword to declare variable");
-    parser_expect(p, TOK_DOLLAR, "Expected dollar sign to name variable in declaration");
-    Token var_tok = parser_expect(p, TOK_STR, "Expected string/identifier variable name for declaration");
-    parser_expect(p, TOK_EQUAL, "Expected equals sign in variable declarataion");
+    Token trash;
 
-    ASTNode *expr = parse_expr(p);
+    if (parser_expect(p, TOK_STR, "Expected let keyword to declare variable", &trash, err) == false) return false;
+    if (parser_expect(p, TOK_DOLLAR, "Expected dollar sign to name variable in declaration", &trash, err) == false) return false;
+    
+    Token var_tok;
+    if (parser_expect(p, TOK_STR, "Expected string/identifier variable name for declaration", &var_tok, err)) return false;
+    
+    if (parser_expect(p, TOK_EQUAL, "Expected equals sign in variable declarataion", &trash, err) == false) return false;
+
+    ASTNode *expr;
+    if (parse_expr(p, &expr, err) == false) return false;
 
     if (parser_peek(p).type != TOK_EOF) {
-        parser_expect(p, TOK_SEMICOLON, "Expected semicolon to complete variable declaration");
+        if (parser_expect(p, TOK_SEMICOLON, "Expected semicolon to complete variable declaration", &trash, err) == false) return false;
     }
 
     VarDecl var_decl = {
@@ -825,51 +863,58 @@ ASTNode* parse_var_decl_stmt(Parser *p) {
     node->type = NODE_VAR_DECL_STMT;
     node->data.var_decl = var_decl;
 
-    return node;
+    *out = *node;
+    return true;
 }
 
-ASTNode* parse_func_call_stmt(Parser *p) {
+bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err) {
     ASTNode *node = malloc(sizeof(ASTNode));
 
-    Token func_tok = parser_expect(p, TOK_STR, "Expected the string/identifier to call");
+    Token trash;
+
+    Token func_tok;
+    if (parser_expect(p, TOK_STR, "Expected the string/identifier to call", &func_tok, err) == false) return false;
 
     Block args;
-    parser_init_block(&args);
+    if (parser_init_block(&args, err) == false) return false;
 
     if (parser_peek(p).type == TOK_DB_COLON) { // parse as func::(arg1, arg2, ...)
         parser_advance(p);
-        parser_expect(p, TOK_LPAREN, "Expected opening parenthesis to open function call");
+        if (parser_expect(p, TOK_LPAREN, "Expected opening parenthesis to open function call", &trash, err) == false) return false;
 
         while (parser_peek(p).type != TOK_RPAREN) {
-            ASTNode *expr = parse_expr(p);
+            ASTNode *expr;
+            if (parse_expr(p, &expr, err) == false) return false;
 
             if (parser_peek(p).type != TOK_RPAREN) {
-                parser_expect(p, TOK_COMMA, "Expected comma to continue argument list");
+                if (parser_expect(p, TOK_COMMA, "Expected comma to continue argument list", &trash, err) == false) return false;
             }
 
             parser_block_push_node(&args, expr);
         }
 
-        parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close function call");
+        if (parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close function call", &trash, err) == false) return false;
     } else { // parse as func arg1 arg2 ...;
         while (parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_SEMICOLON) {
             if (parser_peek(p).type == TOK_LPAREN) { // parse as normal full expression
                 parser_advance(p);
 
-                ASTNode *expr = parse_expr(p);
+                ASTNode *expr;
+                if (parse_expr(p, &expr, err) == false) return false;
 
-                parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close expression closure");
+                if (parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close expression closure", &trash, err) == false) return false;
 
                 parser_block_push_node(&args, expr);
             } else { // only parse simple expression, unary
-                ASTNode *expr = parse_unary_expr(p);
+                ASTNode *expr;
+                if (parse_unary_expr(p, &expr, err) == false) return false;
                 parser_block_push_node(&args, expr);
             }
         }
     }
 
     if (parser_peek(p).type != TOK_EOF) {
-        parser_expect(p, TOK_SEMICOLON, "Expected semicolon to complete function call expression");
+        if (parser_expect(p, TOK_SEMICOLON, "Expected semicolon to complete function call expression", &trash, err) == false) return false;
     }
 
     FuncCall func_call = {
@@ -880,11 +925,12 @@ ASTNode* parse_func_call_stmt(Parser *p) {
     node->type = NODE_FUNC_CALL_STMT;
     node->data.func_call = func_call;
 
-    return node;
+    *out = *node;
+    return true;
 }
 
 ASTNode* parse_func_decl_stmt(Parser *p) {
-    ASTNode *node = malloc(sizeof(ASTNode));
+    /*ASTNode *node = malloc(sizeof(ASTNode));
 
     parser_expect(p, TOK_STR, "Expected fn keyword to declare function");
     Token name_tok = parser_expect(p, TOK_STR, "Expected a string/identifier for function name");
@@ -908,11 +954,13 @@ ASTNode* parse_func_decl_stmt(Parser *p) {
     node->type = NODE_FUNC_DECL_STMT;
     node->data.func_decl = func_decl;
 
-    return node;
+    return node;*/
 }
 
-ASTNode* parse_primary_expr(Parser *p) {
+bool parse_primary_expr(Parser *p, ASTNode *out, Error *err) {
     Token token = parser_peek(p);
+
+    Token trash;
 
     switch (token.type) {
         case TOK_NUM: parser_advance(p); return parser_create_member_node(NODE_VALUE_NUMBER, token.value);
@@ -921,25 +969,33 @@ ASTNode* parse_primary_expr(Parser *p) {
 
         case TOK_DOLLAR: {
             parser_advance(p);
-            Token var_tok = parser_expect(p, TOK_STR, "Expected variable name for variable reference");
-            return parser_create_member_node(NODE_VALUE_VAR_REF, var_tok.value);
+            Token var_tok;
+            if (parser_expect(p, TOK_STR, "Expected variable name for variable reference", &trash, err) == false) return false;
+
+            ASTNode *node = parser_create_member_node(NODE_VALUE_VAR_REF, var_tok.value);
+            *out = *node;
+
+            return true;
         };
 
         case TOK_LPAREN: {
             parser_advance(p);
-            ASTNode *node = parse_expr(p);
-            parser_expect(p, TOK_RPAREN, "Expected ')' after expression");
-            return node;
+            ASTNode *node;
+            if (parse_expr(p, &node, err) == false) return false;
+            if (parser_expect(p, TOK_RPAREN, "Expected ')' after expression", &trash, err) == false) return false;
+
+            *out = *node;
+            return true;
         };
 
         default: {
-            fprintf(stderr, "Parser Error: Unexpected token in primary expression %s\n", get_token_type_string(token.type));
-            exit(1);
+            *err = mkerr("parser", "unexpected token in primary expression %s", get_token_type_string(token.type));
+            return false;
         }
     }
 }
 
-ASTNode* parse_unary_expr(Parser *p) {
+bool parse_unary_expr(Parser *p, ASTNode *out, Error *err) {
     Token token = parser_peek(p);
 
     if (token.type == TOK_MINUS || token.type == TOK_PLUS || token.type == TOK_BANG) {
@@ -950,20 +1006,26 @@ ASTNode* parse_unary_expr(Parser *p) {
         else if (token.type == TOK_PLUS) op = '+';
         else if (token.type == TOK_BANG) op = '!';
         else {
-            fprintf(stderr, "Invalid operator for unary expression");
-            exit(1);
+            *err = mkerr("parser", "invalid operator for unary expression '%c'", op);
+            return false;
         }
 
-        ASTNode *operand = parse_unary_expr(p);
-        
-        return parser_create_unary_op_node(op, operand);
+        ASTNode *operand;
+        if (parse_unary_expr(p, &operand, err) == false) return false;
+
+        if (parser_create_unary_op_node(op, operand, out, err) == false) return false;
+
+        return true;
     }
 
-    return parse_primary_expr(p);
+    if (parse_primary_expr(p, out, err) == false) return false;
+
+    return true;
 }
 
-ASTNode* parse_term_expr(Parser *p) {
-    ASTNode *expr = parse_unary_expr(p); 
+bool parse_term_expr(Parser *p, ASTNode *out, Error *err) {
+    ASTNode *expr;
+    if (parse_unary_expr(p, &expr, err) == false) return false; 
 
     while (parser_peek(p).type == TOK_STAR || parser_peek(p).type == TOK_SLASH) {
         Token op_token = parser_peek(p);
@@ -971,23 +1033,18 @@ ASTNode* parse_term_expr(Parser *p) {
         
         char op = (op_token.type == TOK_STAR) ? '*' : '/';
         
-        ASTNode *right = parse_unary_expr(p); 
+        ASTNode *right; 
+        if (parse_unary_expr(p, &right, err) == false) return false; 
         expr = parser_create_binary_op_node(op, expr, right);
     }
 
-    return expr;
+    *out = *expr;
+    return true;
 }
 
-
-
-ASTNode* parse_expr(Parser *p) {
-    //bool enclosed = false;
-    //if (parser_peek(p).type == TOK_LPAREN) {
-    //    parser_advance(p);
-    //    enclosed = true;
-    //}
-
-    ASTNode *expr = parse_term_expr(p);
+bool parse_expr(Parser *p, ASTNode *out, Error *err) {
+    ASTNode *expr;
+    if (parse_term_expr(p, &expr, err) == false) return false;
 
     while (parser_peek(p).type == TOK_PLUS || parser_peek(p).type == TOK_MINUS) {
         Token op_token = parser_peek(p);
@@ -995,15 +1052,13 @@ ASTNode* parse_expr(Parser *p) {
         
         char op = (op_token.type == TOK_PLUS) ? '+' : '-';
         
-        ASTNode *right = parse_term_expr(p);
+        ASTNode *right;
+        if (parse_term_expr(p, &right, expr) == false) return false;
         expr = parser_create_binary_op_node(op, expr, right);
     }
 
-    //if (enclosed == true) {
-    //    parser_expect(p, TOK_RPAREN, "Expected closing parenthesis to close expression enclosure");
-    //}
-
-    return expr;
+    *out = *expr;
+    return false;
 }
 
 /* Evaluator */
@@ -1272,15 +1327,11 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
 
         case NODE_BINARY_OP: {
             RuntimeValue left, right;
-            Error left_err = {0};
-            Error right_err = {0};
 
-            if (eval(ctx, node->data.binary_op.left, &left, &left_err) == 0) {
-                *err = left_err;
+            if (eval(ctx, node->data.binary_op.left, &left, err) == 0) {
                 return false;
             }
-            if (eval(ctx, node->data.binary_op.right, &right, &right_err) == 0) {
-                *err = right_err;
+            if (eval(ctx, node->data.binary_op.right, &right, err) == 0) {
                 return false;
             }
 
@@ -1321,10 +1372,8 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
                 };
             } else {
                 RuntimeValue v;
-                Error v_err;
 
-                if (eval_arith(op, left, right, &v, &v_err) == 0) {
-                    *err = v_err;
+                if (eval_arith(op, left, right, &v, err) == 0) {
                     return false;
                 }
 
@@ -1340,10 +1389,8 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
 
         case NODE_UNARY_OP: {
             RuntimeValue v;
-            Error v_err = {0};
 
-            if (eval(ctx, node->data.unary_op.operand, &v, &v_err) == 0) {
-                *err = v_err;
+            if (eval(ctx, node->data.unary_op.operand, &v, err) == 0) {
                 return false;
             }
 
@@ -1375,10 +1422,8 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
 
         case NODE_VAR_DECL_STMT: {
             RuntimeValue v;
-            Error v_err = {0};
 
-            if (eval(ctx, node->data.var_decl.expr, &v, &v_err) == false) {
-                *err = v_err;
+            if (eval(ctx, node->data.var_decl.expr, &v, err) == false) {
                 return false;
             }
 
@@ -1397,10 +1442,7 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
             RuntimeValue *args = argc ? malloc(argc * sizeof(RuntimeValue)) : NULL;
             for (size_t i = 0; i < argc; i++) {
                 RuntimeValue v;
-                Error v_err;
-
-                if (eval(ctx, &args_block->nodes[i], &v, &v_err) == false) {
-                    *err = v_err;
+                if (eval(ctx, &args_block->nodes[i], &v, err) == false) {
                     return false;
                 }
 
@@ -1449,10 +1491,7 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
                 val_free(&last);
 
                 RuntimeValue v;
-                Error v_err;
-
-                if (eval(ctx, &node->data.block.nodes[i], &v, &v_err) == false) {
-                    *err = v_err;
+                if (eval(ctx, &node->data.block.nodes[i], &v, err) == false) {
                     return false;
                 }
 
@@ -1464,10 +1503,10 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
 
             *out = last;
             return true;
-        }
+        };
 
         default: {
-            *err = mkerr("runtime", "unhandled node type %s", get_node_type_string(node->type));
+            *err = mkerr("runtime", "unhandled node type %s (%d)", get_node_type_string(node->type), node->type);
             return false;
         };
     }
