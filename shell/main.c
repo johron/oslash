@@ -179,9 +179,9 @@ bool try_run_func_external(Env *env, const char *name, RuntimeValue *args, size_
             fprintf(stderr, "oar: runtime: could not get current working directory\n");
             return false;
         }
-    } else { // not a path
-            fprintf(stderr, "oar: runtime: non path env_get_func_external not implemented yet\n");
-            return false;
+    } else { // not a path, resolve using PATH
+        fprintf(stderr, "oar: runtime: non path env_get_func_external not implemented yet\n");
+        return false;
     }
 
     // Plan
