@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <limits.h>
+#include <unistd.h>
 
 // HEADER
 
@@ -1514,7 +1515,7 @@ RuntimeValue builtin_echo(RuntimeValue *args, size_t argc) {
         }
     }
     printf("\n");
-    return val_void();
+    return val_num(0);
 }
 
 RuntimeValue builtin_exit(RuntimeValue *args, size_t argc) {

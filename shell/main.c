@@ -342,7 +342,8 @@ bool try_run_func_external(Env *env, const char *cmd, RuntimeValue *args, size_t
         }
 
         if (chdir("..") != 0) {
-            fprintf(stderr, "oar: runtime: error changing directory");
+            //fprintf(stderr, "oar: runtime: error changing directory");
+            perror("oar: runtime");
             return false;
         }
 
@@ -389,6 +390,49 @@ bool try_run_func_external(Env *env, const char *cmd, RuntimeValue *args, size_t
     }
 }
 
+RuntimeValue oarshell_cd(RuntimeValue *args, size_t argc) {
+    if (argc > 0) {
+        char* path = malloc(PATH_MAX);
+        if (path == NULL) {
+            fprintf(stderr, "oar: 'cd': could not allocate memory for path");
+            return val_num(1);
+        }
+
+        switch (args[0].type) {
+            case VAL_STR: strcpy(path, args[0].str_val); break;
+            case VAL_NUM: sprintf(path, "%d", args[0].num_val); break;
+            case VAL_FLOAT: sprintf(path, "%f", args[0].float_val); break;
+            case VAL_VOID: {
+                fprintf(stderr, "oar: 'cd': cannot change directory to void value\n");
+                return val_num(1);
+            };
+        }
+
+        if (chdir(path) != 0) {
+            free(path);
+            perror("oar: 'cd'");
+            return val_num(1);
+        }
+
+        free(path);
+
+        return val_num(0);
+    } else {
+        char *home_path = getenv("HOME");
+        if (!home_path || strlen(home_path) == 0) {
+            fprintf(stderr, "oar: 'cd': could not determine home directory");
+            return val_num(1);
+        }
+
+        if (chdir(home_path) != 0) {
+            perror("oar: 'cd'");
+            return val_num(1);
+        }
+
+        return val_num(0);
+    }
+}
+
 void handle_sigint(int sig) {
     (void)sig;
 }
@@ -405,6 +449,8 @@ int main() {
     }
 
     EvalCtx *ctx = ctx_new(try_run_func_external);
+
+    env_set_func(ctx->env, "cd", oarshell_cd);
 
     repl(ctx);
     
