@@ -1020,6 +1020,10 @@ RuntimeValue val_clone(RuntimeValue v) {
     return v;
 }
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 void entry_free(EnvEntry *entry) {
     if (entry->type == ENTRY_VAR) {
         if (entry->value.type == VAL_STR && entry->value.str_val) {

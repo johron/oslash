@@ -106,69 +106,169 @@ int is_regular_file(const char *path) {
     return S_ISREG(path_stat.st_mode);
 }
 
-extern char **environ;
+char** create_argv(char* cmd, RuntimeValue *args, size_t argc) {
+    char **argv = malloc((argc + 2) * sizeof(char*));
+    if (argv == NULL) return NULL;
 
-int spawn_program(char* name, char* path, RuntimeValue *args, size_t argc) {
-    printf("%s, %s\n", name, path);
-    // is it a file?, if so then spawn
+    argv[0] = strdup(cmd); 
+    if (argv[0] == NULL) {
+        free(argv);
+        return NULL;
+    }
 
-    // convert runtime value args to strings
+    for (size_t i = 0; i < argc; i++) {
+        size_t argv_idx = i + 1; 
 
-    int result = is_regular_file(path);
-    if (result == 1) {
-        printf("it's a file\n");
-
-        pid_t pid;
-        char *argv[] = {name /*, stringed_args*/, NULL};
-
-        int status = posix_spawn(&pid, path, NULL, NULL, argv, environ);
-
-        if (status == 0) {
-            printf("Spawned process with pid '%d'\n", pid);
-            waitpid(pid, &status, 0);
-            return 0;
-        } else {
-            //perror(sprintf("oar: %s", name));
-            fprintf(stderr, "oar: %s: %s\n", name, strerror(errno));
+        switch (args[i].type) {
+            case VAL_NUM: {
+                argv[argv_idx] = malloc(64);
+                if (argv[argv_idx]) sprintf(argv[argv_idx], "%d", args[i].num_val);
+                break;
+            };
+            case VAL_FLOAT: {
+                argv[argv_idx] = malloc(64);
+                if (argv[argv_idx]) sprintf(argv[argv_idx], "%g", args[i].float_val);
+                break;
+            };
+            case VAL_STR: {
+                argv[argv_idx] = strdup(args[i].str_val);
+                break;
+            };
+            case VAL_VOID: {
+                argv[argv_idx] = strdup("void"); 
+                break;
+            };
+            default: {
+                argv[argv_idx] = strdup("unknown");
+                break;
+            };
         }
 
-        return 1; // return error code of spawned process?
-    } else if (result == 0) {
-        fprintf(stderr, "oar: runtime: '%s' is directory\n", path);
-        return 1;
-    } else {
-        fprintf(stderr, "oar: runtime: '%s' does not exist\n", path);
-        return 1;
+        if (argv[argv_idx] == NULL) {
+            for (size_t j = 0; j < argv_idx; j++) free(argv[j]);
+            free(argv);
+            return NULL;
+        }
     }
+
+    argv[argc + 1] = NULL;
+    return argv;
 }
 
-bool try_run_func_external(Env *env, const char *name, RuntimeValue *args, size_t argc) {
-    // Try to spawn `name` as program from path...
+void free_argv(char **argv, size_t argc) {
+    if (argv == NULL) return;
 
+    for (size_t i = 0; i < argc + 1; i++) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+extern char **environ;
+
+bool spawn_program(char* cmd, char* path, int *exit_code, RuntimeValue *args, size_t argc) {
+    int result = is_regular_file(path);
+    if (result != 1) {
+        if (result == 0) {
+            fprintf(stderr, "oar: '%s': is directory\n", path);
+        } else {
+            fprintf(stderr, "oar: '%s': does not exist\n", path);
+        }
+
+        return false;
+    }
+
+    char** argv = create_argv(cmd, args, argc);
+    if (argv == NULL) {
+        fprintf(stderr, "oar: '%s': memory allocation failed\n", cmd);
+        return false;
+    }
+
+    pid_t pid;
+    int status = posix_spawn(&pid, path, NULL, NULL, argv, environ);
+
+    if (status == 0) {
+        int wait_status;
+        waitpid(pid, &wait_status, 0);
+        if (WIFEXITED(wait_status)) {
+            *exit_code = WEXITSTATUS(wait_status);
+        }
+    } else {
+        *exit_code = 1;
+        fprintf(stderr, "oar: '%s': %s\n", cmd, strerror(status));
+    }
+
+    free_argv(argv, argc);
+    return true;
+}
+
+int resolve_from_env_path(const char *cmd, char *resolved_path) {
+    char *path_env = getenv("PATH");
+    if (!path_env || strlen(path_env) == 0) {
+        return 0;
+    }
+
+    char *path_copy = strdup(path_env);
+    if (!path_copy) {
+        return 0; 
+    }
+
+    int found = 0;
+    char *dir = strtok(path_copy, ":");
+
+    while (dir != NULL) {
+        char candidate[PATH_MAX];
+        
+        const char *search_dir = (strlen(dir) == 0) ? "." : dir;
+
+        int len = snprintf(candidate, sizeof(candidate), "%s/%s", search_dir, cmd);
+        
+        if (len > 0 && len < (int)sizeof(candidate)) {
+            if (access(candidate, X_OK) == 0) {
+                strncpy(resolved_path, candidate, PATH_MAX - 1);
+                resolved_path[PATH_MAX - 1] = '\0';
+                found = 1;
+                break; 
+            }
+        }
+
+        dir = strtok(NULL, ":");
+    }
+
+    free(path_copy);
+    return found;
+}
+
+bool try_run_func_external(Env *env, const char *cmd, RuntimeValue *args, size_t argc) {
     char path[PATH_MAX];
 
-    if (startsWith("/", name) == true) { // absolute
-        strcpy(path, name);
-        printf("path: '%s'\n", path);
-        if (spawn_program(name, path, args, argc) != 0) { // TODO: maybe prettify name in spawn program, so /bin/.../program becomes program or something..
+    if (startsWith("/", cmd) == true) { // absolute
+        strcpy(path, cmd);
+
+        int exit_code;
+        if (spawn_program(cmd, path, &exit_code, args, argc) != 0) { // TODO: maybe prettify name in spawn program, so /bin/.../program becomes program or something..
             return false;
         }
 
+        printf("Exited with code %d\n", exit_code);
+
         return true;
-    } else if (startsWith("./", name) == true) { // relative
+    } else if (startsWith("./", cmd) == true) { // relative
         char cwd[PATH_MAX];
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
-            if (strlen(name) > 0) {
-                char* old_name[strlen(name)];
-                strcpy(old_name, name);
+            if (strlen(cmd) > 0) {
+                char* name[strlen(cmd)];
+                strcpy(name, cmd);
 
-                memmove(name, name + 2, strlen(name));
-                snprintf(path, sizeof(path), "%s/%s", cwd, name);
+                memmove(cmd, cmd + 2, strlen(cmd));
+                snprintf(path, sizeof(path), "%s/%s", cwd, cmd);
                 
-                printf("path: '%s'\n", path);
-                if (spawn_program(old_name, path, args, argc) != 0) {
+                int exit_code;
+                if (spawn_program(name, path, &exit_code, args, argc) != 0) {
                     return false;
                 }
+
+                printf("Exited with code %d\n", exit_code);
 
                 return true;
             } else {
@@ -180,18 +280,19 @@ bool try_run_func_external(Env *env, const char *name, RuntimeValue *args, size_
             return false;
         }
     } else { // not a path, resolve using PATH
-        fprintf(stderr, "oar: runtime: non path env_get_func_external not implemented yet\n");
+        if (resolve_from_env_path(cmd, path)) {
+            int exit_code;
+            if (spawn_program(cmd, path, &exit_code, args, argc) != 0) {
+                return false;
+            }
+
+            printf("Exited with code %d\n", exit_code);
+            return true;
+        }
+        
+        fprintf(stderr, "oar: '%s': unknown function\n", cmd);
         return false;
     }
-
-    // Plan
-    // * First check if the name starts with / or ./ (also need to fix the lexer to support these as strings), also need to make lexer make basically anything into a string
-    //     * If a path is supplied, then check if it exists then run that
-    // * else path resolver, checks the path for `name` and runs that
-    // * else error 
-
-    fprintf(stderr, "oar: runtime: unknown function '%s'", name);
-    return false;
 }
 
 int main() {
