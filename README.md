@@ -2,9 +2,9 @@
 - Modern shell and scripting language
 
 ## TODO:
-- [ ] PATH resolver for shell
+- [x] PATH resolver for shell
 - [ ] Stringigy everything if possible in the language, maybe based on a macro OAR_STRINGIFY_ARGS or something.
-    - [ ] add more cases in lexer that build strings such as when writing paths: ./, /, etc.
+    - [x] add more cases in lexer that build strings such as when writing paths: ./, /, etc.
 
 ## Syntax idea
 ```oar
