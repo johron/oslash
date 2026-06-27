@@ -197,11 +197,13 @@ bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err);
 bool parse_block(Parser *p, ASTNode *out, Error *err);
 
 bool parser_init_block(Block *block, Error *err);
-void parser_block_push_node(Block *block, ASTNode *node);
+bool parser_block_push_node(Block *block, ASTNode *node);
+static inline void parser_free_block(Block *block);
+static inline void parser_free_ast(ASTNode *node);
+static inline void parser_free_ast_owned(ASTNode *node);
 
 ASTNode* parser_create_member_node(NodeType type, TokenValue value);
 ASTNode* parser_create_binary_op_node(char op, ASTNode *left, ASTNode *right);
-bool parser_create_unary_op_node(char op, ASTNode *operand, ASTNode *out, Error *err);
 
 Token parser_peek(Parser *p);
 Token parser_advance(Parser *p);
@@ -212,7 +214,7 @@ bool parse_term_expr(Parser *p, ASTNode *out, Error *err);
 bool parse_unary_expr(Parser *p, ASTNode *out, Error *err);
 bool parse_primary_expr(Parser *p, ASTNode *out, Error *err);
 
-void parser_free_ast(ASTNode *node);
+static inline void parser_free_ast(ASTNode *node);
 
 /* Evaluator */
 
@@ -655,13 +657,18 @@ bool init_tok_array(TokenArray *a, Error *err) {
     return true;
 }
 
-void push_token(TokenArray *a, Token t) {
+bool push_token(TokenArray *a, Token t) {
     if (a->size >= a->cap) {
         a->cap *= 2;
-        a->data = realloc(a->data, a->cap * sizeof(Token));
+        Token *next = realloc(a->data, a->cap * sizeof(Token));
+        if (next == NULL) {
+            return false;
+        }
+        a->data = next;
     }
 
     a->data[a->size++] = t;
+    return true;
 }
 
 bool lex_all(Lexer *l, TokenArray *out, Error *err) {
@@ -677,7 +684,11 @@ bool lex_all(Lexer *l, TokenArray *out, Error *err) {
             return false;
         }
 
-        push_token(&arr, t);
+        if (push_token(&arr, t) == false) {
+            free_tok_array(&arr);
+            *err = mkerr("lexer", "could not grow token array");
+            return false;
+        }
 
         if (t.type == TOK_EOF)
             break;
@@ -726,13 +737,18 @@ bool parser_init_block(Block *block, Error *err) {
     return true;
 }
 
-void parser_block_push_node(Block *block, ASTNode *node) {
+bool parser_block_push_node(Block *block, ASTNode *node) {
     if (block->size >= block->cap) {
         block->cap *= 2;
-        block->nodes = realloc(block->nodes, block->cap * sizeof(ASTNode));
+        ASTNode *next = realloc(block->nodes, block->cap * sizeof(ASTNode));
+        if (next == NULL) {
+            return false;
+        }
+        block->nodes = next;
     }
 
     block->nodes[block->size++] = *node;
+    return true;
 }
 
 bool parse_block(Parser *p, ASTNode *out, Error *err) {
@@ -743,8 +759,17 @@ bool parse_block(Parser *p, ASTNode *out, Error *err) {
            parser_peek(p).type != TOK_EOF &&
            parser_peek(p).type != TOK_RBRACE) {
         ASTNode node = {0};
-        if (parse_stmt(p, &node, err) == false) return false;
-        parser_block_push_node(&block, &node);
+        if (parse_stmt(p, &node, err) == false) {
+            parser_free_ast(&node);
+            parser_free_block(&block);
+            return false;
+        }
+        if (parser_block_push_node(&block, &node) == false) {
+            parser_free_ast(&node);
+            parser_free_block(&block);
+            *err = mkerr("parser", "could not grow block node array");
+            return false;
+        }
     }
 
     out->type = NODE_BLOCK;
@@ -774,17 +799,65 @@ bool parser_expect(Parser *p, TokenType type, const char *message, Token *out, E
     return false;
 }
 
-void parser_free_ast(ASTNode *node) {
-    if (!node) return;
+static inline void parser_free_ast_owned(ASTNode *node);
 
-    if (node->type == NODE_BINARY_OP) {
-        parser_free_ast(node->data.binary_op.left);
-        parser_free_ast(node->data.binary_op.right);
-    } else if (node->type == NODE_UNARY_OP) {
-        parser_free_ast(node->data.unary_op.operand);
+static inline void parser_free_block(Block *block) {
+    if (block == NULL) return;
+
+    for (size_t i = 0; i < block->size; i++) {
+        parser_free_ast(&block->nodes[i]);
     }
 
-    free(node);
+    free(block->nodes);
+    block->nodes = NULL;
+    block->size = 0;
+    block->cap = 0;
+}
+
+static inline void parser_free_ast_impl(ASTNode *node, bool free_self) {
+    if (node == NULL) return;
+
+    switch (node->type) {
+    case NODE_BLOCK: {
+        parser_free_block(&node->data.block);
+        break;
+    }
+    case NODE_FUNC_CALL_STMT: {
+        parser_free_block(&node->data.func_call.args);
+        break;
+    }
+    case NODE_VAR_DECL_STMT: {
+        parser_free_ast_owned(node->data.var_decl.expr);
+        node->data.var_decl.expr = NULL;
+        break;
+    }
+    case NODE_BINARY_OP: {
+        parser_free_ast_owned(node->data.binary_op.left);
+        parser_free_ast_owned(node->data.binary_op.right);
+        node->data.binary_op.left = NULL;
+        node->data.binary_op.right = NULL;
+        break;
+    }
+    case NODE_UNARY_OP: {
+        parser_free_ast_owned(node->data.unary_op.operand);
+        node->data.unary_op.operand = NULL;
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (free_self) {
+        free(node);
+    }
+}
+
+static inline void parser_free_ast(ASTNode *node) {
+    parser_free_ast_impl(node, false);
+}
+
+static inline void parser_free_ast_owned(ASTNode *node) {
+    parser_free_ast_impl(node, true);
 }
 
 ASTNode* parser_create_member_node(NodeType type, TokenValue value) {
@@ -813,24 +886,6 @@ ASTNode* parser_create_binary_op_node(char op, ASTNode *left, ASTNode *right) {
     return node;
 }
 
-bool parser_create_unary_op_node(char op, ASTNode *operand, ASTNode *out, Error *err) {
-    ASTNode *node = (ASTNode*)malloc(sizeof(ASTNode));
-    if (!node) {
-        *err = mkerr("parser", "allocation failed for unary node");
-        return false;
-    }
-    
-    node->type = NODE_UNARY_OP;
-    node->data.unary_op.op = op;
-    node->data.unary_op.operand = operand;
-    
-    *out = *node;
-    return true;
-}
-
-
-//bool parse_stmt(Parser *p, ASTNode *out, Error *err);
-
 bool parse_stmt(Parser *p, ASTNode *out, Error *err) {
     switch (p->tok_array.data[p->pos].type) {
         case TOK_STR: {
@@ -850,8 +905,12 @@ bool parse_stmt(Parser *p, ASTNode *out, Error *err) {
         };
         case TOK_LPAREN: { // statement enclosure
             parser_advance(p);
-            if (parse_stmt(p, out, err) == false) return false;
-            if (parser_expect(p, TOK_RPAREN, "Expected parenthesis to close statement enclosure", out, err) == false) return false;
+            if (parse_stmt(p, out, err) == false) {
+                parser_free_ast(out);
+                return false;
+            }
+            Token trash;
+            if (parser_expect(p, TOK_RPAREN, "Expected parenthesis to close statement enclosure", &trash, err) == false) return false;
             return true;
         };
         default: { // TODO: add some expression statement stuff somewhere here
@@ -869,8 +928,16 @@ bool parse_var_decl_stmt(Parser *p, ASTNode *out, Error *err) {
     if (parser_expect(p, TOK_STR,    "Expected var name",    &var_tok, err) == false) return false;
     if (parser_expect(p, TOK_EQUAL,  "Expected '='",         &trash,   err) == false) return false;
 
-    ASTNode *expr = malloc(sizeof(ASTNode));
-    if (parse_expr(p, expr, err) == false) return false;
+    ASTNode *expr = calloc(1, sizeof(ASTNode));
+    if (expr == NULL) {
+        *err = mkerr("parser", "alloc failed");
+        return false;
+    }
+
+    if (parse_expr(p, expr, err) == false) {
+        parser_free_ast_owned(expr);
+        return false;
+    }
 
     if (parser_peek(p).type != TOK_EOF) {
         if (parser_expect(p, TOK_SEMICOLON, "Expected ';'", &trash, err) == false) return false;
@@ -889,16 +956,35 @@ bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err) {
     Block args;
     if (parser_init_block(&args, err) == false) return false;
 
+    bool ok = false;
     while (parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_SEMICOLON) {
-        ASTNode *expr = malloc(sizeof(ASTNode));
+        ASTNode *expr = calloc(1, sizeof(ASTNode));
+        if (expr == NULL) {
+            *err = mkerr("parser", "alloc failed");
+            goto cleanup;
+        }
+
         if (parser_peek(p).type == TOK_LPAREN) {
             parser_advance(p);
-            if (parse_expr(p, expr, err) == false) return false;
-            if (parser_expect(p, TOK_RPAREN, "Expected ')'", &trash, err) == false) return false;
+            if (parse_expr(p, expr, err) == false) {
+                parser_free_ast_owned(expr);
+                goto cleanup;
+            }
+            if (parser_expect(p, TOK_RPAREN, "Expected ')'", &trash, err) == false) {
+                parser_free_ast_owned(expr);
+                goto cleanup;
+            }
         } else {
-            if (parse_unary_expr(p, expr, err) == false) return false;
+            if (parse_unary_expr(p, expr, err) == false) {
+                parser_free_ast_owned(expr);
+                goto cleanup;
+            }
         }
-        parser_block_push_node(&args, expr);
+        if (parser_block_push_node(&args, expr) == false) {
+            parser_free_ast_owned(expr);
+            goto cleanup;
+        }
+        free(expr);
     }
 
     if (parser_peek(p).type != TOK_EOF) {
@@ -908,7 +994,15 @@ bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err) {
     out->type = NODE_FUNC_CALL_STMT;
     out->data.func_call.name = func_tok.value.str_value;
     out->data.func_call.args = args;
-    return true;
+
+    ok = true;
+
+cleanup:
+    if (!ok) {
+        parser_free_block(&args);
+    }
+
+    return ok;
 }
 
 ASTNode* parse_func_decl_stmt(Parser *p) {
@@ -945,18 +1039,33 @@ bool parse_primary_expr(Parser *p, ASTNode *out, Error *err) {
     Token trash;
 
     switch (token.type) {
-        case TOK_NUM: parser_advance(p); *out = *parser_create_member_node(NODE_VALUE_NUMBER, token.value); return true;
-        case TOK_FLOAT: parser_advance(p); *out = *parser_create_member_node(NODE_VALUE_FLOAT, token.value); return true;
-        case TOK_STR: parser_advance(p); *out = *parser_create_member_node(NODE_VALUE_STRING, token.value); return true;
+        case TOK_NUM: {
+            parser_advance(p);
+            out->type = NODE_VALUE_NUMBER;
+            out->data.value = token.value;
+            return true;
+        };
+
+        case TOK_FLOAT: {
+            parser_advance(p);
+            out->type = NODE_VALUE_FLOAT;
+            out->data.value = token.value;
+            return true;
+        };
+
+        case TOK_STR: {
+            parser_advance(p);
+            out->type = NODE_VALUE_STRING;
+            out->data.value = token.value;
+            return true;
+        };
 
         case TOK_DOLLAR: {
             parser_advance(p);
             Token var_tok;
-            if (parser_expect(p, TOK_STR, "Expected variable name for variable reference", &var_tok, err) == false) return false;
-
-            ASTNode *node = parser_create_member_node(NODE_VALUE_VAR_REF, var_tok.value);
-            *out = *node;
-
+            if (parser_expect(p, TOK_STR, "Expected variable name", &var_tok, err) == false) return false;
+            out->type = NODE_VALUE_VAR_REF;
+            out->data.value = var_tok.value;
             return true;
         };
 
@@ -964,7 +1073,10 @@ bool parse_primary_expr(Parser *p, ASTNode *out, Error *err) {
             parser_advance(p);
             ASTNode node;
             if (parse_expr(p, &node, err) == false) return false;
-            if (parser_expect(p, TOK_RPAREN, "Expected ')' after expression", &trash, err) == false) return false;
+            if (parser_expect(p, TOK_RPAREN, "Expected ')' after expression", &trash, err) == false) {
+                parser_free_ast(&node);
+                return false;
+            }
 
             *out = node;
             return true;
@@ -982,68 +1094,78 @@ bool parse_unary_expr(Parser *p, ASTNode *out, Error *err) {
 
     if (token.type == TOK_MINUS || token.type == TOK_PLUS || token.type == TOK_BANG) {
         parser_advance(p);
-        
-        char op;
-        if (token.type == TOK_MINUS) op = '-';
-        else if (token.type == TOK_PLUS) op = '+';
-        else if (token.type == TOK_BANG) op = '!';
-        else {
-            *err = mkerr("parser", "invalid operator for unary expression '%c'", op);
+        char op = (token.type == TOK_MINUS) ? '-' : (token.type == TOK_PLUS) ? '+' : '!';
+
+        ASTNode *operand = calloc(1, sizeof(ASTNode));
+        if (!operand) { *err = mkerr("parser", "alloc failed"); return false; }
+
+        if (parse_unary_expr(p, operand, err) == false) {
+            parser_free_ast_owned(operand);
             return false;
         }
 
-        ASTNode *operand;
-        if (parse_unary_expr(p, &operand, err) == false) return false;
-
-        if (parser_create_unary_op_node(op, operand, out, err) == false) return false;
-
+        out->type = NODE_UNARY_OP;
+        out->data.unary_op.op = op;
+        out->data.unary_op.operand = operand;
         return true;
     }
 
-    if (parse_primary_expr(p, out, err) == false) return false;
-
-    return true;
+    return parse_primary_expr(p, out, err);
 }
 
 bool parse_term_expr(Parser *p, ASTNode *out, Error *err) {
-    ASTNode expr;
-    if (parse_unary_expr(p, &expr, err) == false) return false; 
+    if (parse_unary_expr(p, out, err) == false) return false;
 
     while (parser_peek(p).type == TOK_STAR || parser_peek(p).type == TOK_SLASH) {
-        Token op_token = parser_peek(p);
-        parser_advance(p);
-        
+        Token op_token = parser_advance(p);
         char op = (op_token.type == TOK_STAR) ? '*' : '/';
-        
-        ASTNode *right; 
-        if (parse_unary_expr(p, &right, err) == false) return false; 
-        expr = *parser_create_binary_op_node(op, &expr, right);
+
+        ASTNode *left = malloc(sizeof(ASTNode));
+        if (!left) { *err = mkerr("parser", "alloc failed"); return false; }
+        *left = *out;
+
+        ASTNode *right = calloc(1, sizeof(ASTNode));
+        if (!right) { free(left); *err = mkerr("parser", "alloc failed"); return false; }
+        if (parse_unary_expr(p, right, err) == false) {
+            parser_free_ast_owned(right);
+            parser_free_ast_owned(left);
+            return false;
+        }
+
+        out->type = NODE_BINARY_OP;
+        out->data.binary_op.op = op;
+        out->data.binary_op.left = left;
+        out->data.binary_op.right = right;
     }
 
-    *out = expr;
     return true;
 }
 
 bool parse_expr(Parser *p, ASTNode *out, Error *err) {
-    ASTNode left;
-    if (parse_term_expr(p, &left, err) == false) return false;
+    if (parse_term_expr(p, out, err) == false) return false;
 
     while (parser_peek(p).type == TOK_PLUS || parser_peek(p).type == TOK_MINUS) {
         Token op_token = parser_advance(p);
         char op = (op_token.type == TOK_PLUS) ? '+' : '-';
 
-        ASTNode right;
-        if (parse_term_expr(p, &right, err) == false) return false;
+        ASTNode *left = malloc(sizeof(ASTNode));
+        if (!left) { *err = mkerr("parser", "alloc failed"); return false; }
+        *left = *out;
 
-        ASTNode *lhs = malloc(sizeof(ASTNode));
-        ASTNode *rhs = malloc(sizeof(ASTNode));
-        *lhs = left;
-        *rhs = right;
+        ASTNode *right = calloc(1, sizeof(ASTNode));
+        if (!right) { free(left); *err = mkerr("parser", "alloc failed"); return false; }
+        if (parse_term_expr(p, right, err) == false) {
+            parser_free_ast_owned(right);
+            parser_free_ast_owned(left);
+            return false;
+        }
 
-        left = *parser_create_binary_op_node(op, lhs, rhs);
+        out->type = NODE_BINARY_OP;
+        out->data.binary_op.op = op;
+        out->data.binary_op.left = left;
+        out->data.binary_op.right = right;
     }
 
-    *out = left;
     return true;
 }
 
@@ -1321,10 +1443,11 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
         case NODE_BINARY_OP: {
             RuntimeValue left, right;
 
-            if (eval(ctx, node->data.binary_op.left, &left, err) == 0) {
+            if (eval(ctx, node->data.binary_op.left, &left, err) == false) {
                 return false;
             }
-            if (eval(ctx, node->data.binary_op.right, &right, err) == 0) {
+            if (eval(ctx, node->data.binary_op.right, &right, err) == false) {
+                val_free(&left);
                 return false;
             }
 
@@ -1358,6 +1481,12 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
                 
                 size_t len = strlen(left_side) + strlen(right_side) + 1;
                 char *buf = malloc(len);
+                if (buf == NULL) {
+                    val_free(&left);
+                    val_free(&right);
+                    *err = mkerr("runtime", "could not allocate memory for concatenated string");
+                    return false;
+                }
                 snprintf(buf, len, "%s%s", left_side, right_side);
                 result = (RuntimeValue) {
                     .type = VAL_STR,
@@ -1383,7 +1512,7 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
         case NODE_UNARY_OP: {
             RuntimeValue v;
 
-            if (eval(ctx, node->data.unary_op.operand, &v, err) == 0) {
+            if (eval(ctx, node->data.unary_op.operand, &v, err) == false) {
                 return false;
             }
 
@@ -1433,9 +1562,17 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
 
             size_t argc = args_block ? args_block->size : 0;
             RuntimeValue *args = argc ? malloc(argc * sizeof(RuntimeValue)) : NULL;
-            for (size_t i = 0; i < argc; i++) {
+            if (argc > 0 && args == NULL) {
+                *err = mkerr("runtime", "could not allocate memory for function arguments");
+                return false;
+            }
+
+            size_t i = 0;
+            for (; i < argc; i++) {
                 RuntimeValue v;
                 if (eval(ctx, &args_block->nodes[i], &v, err) == false) {
+                    for (size_t j = 0; j < i; j++) val_free(&args[j]);
+                    free(args);
                     return false;
                 }
 
@@ -1451,10 +1588,14 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
                 #ifdef OAR_USE_EXTERNAL_FUNCTION_SOURCE
                 bool extern_func = ctx->try_run_func_external(ctx->env, name, args, argc);
                 if (!extern_func) {
+                    for (size_t j = 0; j < argc; j++) val_free(&args[j]);
+                    free(args);
                     return false;
                 }
                 #else
                 *err = mkerr("runtime", "unknown function '%s'", name);
+                for (size_t j = 0; j < argc; j++) val_free(&args[j]);
+                free(args);
                 return false;
                 #endif
             }
@@ -1474,6 +1615,10 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
         case NODE_BLOCK: {
             RuntimeValue last = val_void();
             Env *child = env_new(ctx->env);
+            if (child == NULL) {
+                *err = mkerr("runtime", "could not allocate child environment");
+                return false;
+            }
             Env *saved = ctx->env;
             ctx->env   = child;
 
@@ -1482,6 +1627,8 @@ bool eval(EvalCtx *ctx, ASTNode *node, RuntimeValue *out, Error *err) {
 
                 RuntimeValue v;
                 if (eval(ctx, &node->data.block.nodes[i], &v, err) == false) {
+                    ctx->env = saved;
+                    env_free(child);
                     return false;
                 }
 

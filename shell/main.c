@@ -26,7 +26,7 @@ bool exec_input(EvalCtx *ctx, char* input, Error *err) {
     if (lex_all(&lexer, &tok_array, &tok_arr_err) == false) {
         *err = tok_arr_err;
         return false;
-    } 
+    }
 
     Parser parser = {
         .tok_array = tok_array,
@@ -36,21 +36,33 @@ bool exec_input(EvalCtx *ctx, char* input, Error *err) {
     size_t size = 0;
     size_t cap = 32;
     ASTNode *nodes = malloc(cap * sizeof(ASTNode));
+    if (nodes == NULL) {
+        free_tok_array(&tok_array);
+        *err = mkerr("parser", "could not allocate memory for nodes");
+        return false;
+    }
+
+    bool ok = false;
 
     while (parser.pos < parser.tok_array.size && parser_peek(&parser).type != TOK_EOF && parser_peek(&parser).type != TOK_RBRACE) {
-        ASTNode node;
+        ASTNode node = {0};
         if (parse_stmt(&parser, &node, err) == false) {
-            return false;
+            parser_free_ast(&node);
+            goto cleanup;
         }
 
-        if (&node != NULL) {
-            if (size >= cap) {
-                cap *= 2;
-                nodes = realloc(nodes, cap * sizeof(ASTNode));
+        if (size >= cap) {
+            cap *= 2;
+            ASTNode *next = realloc(nodes, cap * sizeof(ASTNode));
+            if (next == NULL) {
+                parser_free_ast(&node);
+                *err = mkerr("parser", "could not grow node array");
+                goto cleanup;
             }
-
-            nodes[size++] = node;
+            nodes = next;
         }
+
+        nodes[size++] = node;
     }
 
     for (size_t i = 0; i < size; i++) {
@@ -59,15 +71,23 @@ bool exec_input(EvalCtx *ctx, char* input, Error *err) {
 
         if (eval(ctx, &nodes[i], &v, &v_err) == false) {
             *err = v_err;
-            return false;
+            goto cleanup;
         }
 
+        val_free(&v);
+    }
+
+    ok = true;
+
+cleanup:
+    for (size_t i = 0; i < size; i++) {
         parser_free_ast(&nodes[i]);
     }
 
+    free(nodes);
     free_tok_array(&tok_array);
 
-    return true;
+    return ok;
 }
 
 
