@@ -192,7 +192,7 @@ bool parse_stmt(Parser *p, ASTNode *out, Error *err);
 
 bool parse_var_decl_stmt(Parser *p, ASTNode *out, Error *err);
 ASTNode* parse_func_decl_stmt(Parser *p);
-bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err);
+bool parse_func_call_expr(Parser *p, ASTNode *out, Error *err);
 
 bool parse_block(Parser *p, ASTNode *out, Error *err);
 
@@ -213,6 +213,7 @@ bool parse_expr(Parser *p, ASTNode *out, Error *err);
 bool parse_term_expr(Parser *p, ASTNode *out, Error *err);
 bool parse_unary_expr(Parser *p, ASTNode *out, Error *err);
 bool parse_primary_expr(Parser *p, ASTNode *out, Error *err);
+bool parse_primary_expr_as_arg(Parser *p, ASTNode *out, Error *err);
 
 static inline void parser_free_ast(ASTNode *node);
 
@@ -781,6 +782,14 @@ Token parser_peek(Parser *p) {
     return p->tok_array.data[p->pos];
 }
 
+Token parser_peek_next(Parser *p) {
+    if (p->pos > p->tok_array.size) {
+        fprintf(stderr, "Tried to peek next to non existent token");
+        exit(1);
+    }
+    return p->tok_array.data[p->pos + 1];
+}
+
 Token parser_advance(Parser *p) {
     if (parser_peek(p).type != TOK_EOF) {
         p->pos++;
@@ -895,10 +904,12 @@ bool parse_stmt(Parser *p, ASTNode *out, Error *err) {
                 fprintf(stderr, "Convert parse_func_decl_stmt() to new error system, also implement function declarations in parser and eval\n");
                 exit(1);
                 //return parse_func_decl_stmt(p);
+                return true;
             } else if (strcmp(tok.value.str_value, "let") == 0) { // let $x = ... (;)
                 if (parse_var_decl_stmt(p, out, err) == false) return false;
-            } else { // treat as function call 
-                if (parse_func_call_stmt(p, out, err) == false) return false;
+                return true;
+            } else { // parse primary expression as statement
+                if (parse_expr(p, out, err) == false) return false;
             }
 
             return true;
@@ -913,7 +924,7 @@ bool parse_stmt(Parser *p, ASTNode *out, Error *err) {
             if (parser_expect(p, TOK_RPAREN, "Expected parenthesis to close statement enclosure", &trash, err) == false) return false;
             return true;
         };
-        default: { // TODO: add some expression statement stuff somewhere here
+        default: {
             *err = mkerr("parser", "unexpected tokens found while parsing statement, got '%s'", get_token_type_string(p->tok_array.data[p->pos].type));
             return false;
         };
@@ -949,7 +960,7 @@ bool parse_var_decl_stmt(Parser *p, ASTNode *out, Error *err) {
     return true;
 }
 
-bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err) {
+bool parse_func_call_expr(Parser *p, ASTNode *out, Error *err) {
     Token trash, func_tok;
     if (parser_expect(p, TOK_STR, "Expected function name", &func_tok, err) == false) return false;
 
@@ -975,7 +986,7 @@ bool parse_func_call_stmt(Parser *p, ASTNode *out, Error *err) {
                 goto cleanup;
             }
         } else {
-            if (parse_unary_expr(p, expr, err) == false) {
+            if (parse_primary_expr_as_arg(p, expr, err) == false) {
                 parser_free_ast_owned(expr);
                 goto cleanup;
             }
@@ -1054,9 +1065,7 @@ bool parse_primary_expr(Parser *p, ASTNode *out, Error *err) {
         };
 
         case TOK_STR: {
-            parser_advance(p);
-            out->type = NODE_VALUE_STRING;
-            out->data.value = token.value;
+            if (parse_func_call_expr(p, out, err) == false) return false;
             return true;
         };
 
@@ -1084,6 +1093,56 @@ bool parse_primary_expr(Parser *p, ASTNode *out, Error *err) {
 
         default: {
             *err = mkerr("parser", "unexpected token in primary expression %s", get_token_type_string(token.type));
+            return false;
+        }
+    }
+}
+
+bool parse_primary_expr_as_arg(Parser *p, ASTNode *out, Error *err) {
+    Token token = parser_peek(p);
+    Token trash;
+
+    switch (token.type) {
+        case TOK_NUM: {
+            parser_advance(p);
+            out->type = NODE_VALUE_NUMBER;
+            out->data.value = token.value;
+            return true;
+        }
+        case TOK_FLOAT: {
+            parser_advance(p);
+            out->type = NODE_VALUE_FLOAT;
+            out->data.value = token.value;
+            return true;
+        }
+        case TOK_STR: {
+            // Always treat as a plain string in argument position
+            parser_advance(p);
+            out->type = NODE_VALUE_STRING;
+            out->data.value = token.value;
+            return true;
+        }
+        case TOK_DOLLAR: {
+            parser_advance(p);
+            Token var_tok;
+            if (parser_expect(p, TOK_STR, "Expected variable name", &var_tok, err) == false) return false;
+            out->type = NODE_VALUE_VAR_REF;
+            out->data.value = var_tok.value;
+            return true;
+        }
+        case TOK_LPAREN: {
+            parser_advance(p);
+            ASTNode node;
+            if (parse_expr(p, &node, err) == false) return false;
+            if (parser_expect(p, TOK_RPAREN, "Expected ')' after expression", &trash, err) == false) {
+                parser_free_ast(&node);
+                return false;
+            }
+            *out = node;
+            return true;
+        }
+        default: {
+            *err = mkerr("parser", "unexpected token in argument: %s", get_token_type_string(token.type));
             return false;
         }
     }
