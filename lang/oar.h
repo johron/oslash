@@ -968,7 +968,7 @@ bool parse_func_call_expr(Parser *p, ASTNode *out, Error *err) {
     if (parser_init_block(&args, err) == false) return false;
 
     bool ok = false;
-    while (parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_SEMICOLON) {
+    while (parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_SEMICOLON && parser_peek(p).type != TOK_RPAREN) {
         ASTNode *expr = calloc(1, sizeof(ASTNode));
         if (expr == NULL) {
             *err = mkerr("parser", "alloc failed");
@@ -998,7 +998,7 @@ bool parse_func_call_expr(Parser *p, ASTNode *out, Error *err) {
         free(expr);
     }
 
-    if (parser_peek(p).type != TOK_EOF) {
+    if (parser_peek(p).type != TOK_EOF && parser_peek(p).type != TOK_RPAREN) {
         if (parser_expect(p, TOK_SEMICOLON, "Expected ';'", &trash, err) == false) return false;
     }
 
