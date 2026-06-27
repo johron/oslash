@@ -250,35 +250,93 @@ bool try_run_func_external(Env *env, const char *cmd, RuntimeValue *args, size_t
             return false;
         }
 
-        printf("Exited with code %d\n", exit_code);
-
         return true;
     } else if (startsWith("./", cmd) == true) { // relative
         char cwd[PATH_MAX];
-        if (getcwd(cwd, sizeof(cwd)) != NULL) {
-            if (strlen(cmd) > 0) {
-                char* name[strlen(cmd)];
-                strcpy(name, cmd);
-
-                memmove(cmd, cmd + 2, strlen(cmd));
-                snprintf(path, sizeof(path), "%s/%s", cwd, cmd);
-                
-                int exit_code;
-                if (spawn_program(name, path, &exit_code, args, argc) != 0) {
-                    return false;
-                }
-
-                printf("Exited with code %d\n", exit_code);
-
-                return true;
-            } else {
-                fprintf(stderr, "oar: runtime: string is too short, I don't think this should happen\n");
-                return false;
-            }
-        } else {
+        if (getcwd(cwd, sizeof(cwd)) == NULL) {
             fprintf(stderr, "oar: runtime: could not get current working directory\n");
             return false;
         }
+
+        if (strlen(cmd) == 0) {
+            fprintf(stderr, "oar: runtime: string is too short, I don't think this should happen\n");
+            return false;
+        }
+
+        char* name[strlen(cmd)];
+        strcpy(name, cmd);
+
+        memmove(cmd, cmd + 2, strlen(cmd));
+        snprintf(path, sizeof(path), "%s/%s", cwd, cmd);
+        
+        int exit_code;
+        if (spawn_program(name, path, &exit_code, args, argc) != 0) {
+            return false;
+        }
+
+        return true;
+    } else if (strchr(cmd, '/') != NULL) {
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof(cwd)) == NULL) {
+            fprintf(stderr, "oar: runtime: could not get current working directory\n");
+            return false;
+        }
+
+        if (strlen(cmd) == 0) {
+            fprintf(stderr, "oar: runtime: string is too short, I don't think this should happen\n");
+            return false;
+        }
+
+        snprintf(path, sizeof(path), "%s/%s", cwd, cmd);
+
+        int exit_code;
+        if (spawn_program(cmd, path, &exit_code, args, argc) != 0) {
+            return false;
+        }
+
+        return true;
+    } else if (startsWith("../", cmd) == true) {
+        char orig_cwd[PATH_MAX];
+        char parent_cwd[PATH_MAX];
+
+        if (getcwd(orig_cwd, sizeof(orig_cwd)) == NULL) {
+            fprintf(stderr, "oar: runtime: could not get current working directory path\n");
+            return false;
+        }
+
+        if (chdir("..") != 0) {
+            fprintf(stderr, "oar: runtime: error changing directory");
+            return false;
+        }
+
+
+        if (getcwd(parent_cwd, sizeof(parent_cwd)) == NULL) {
+            fprintf(stderr, "oar: runtime: could not get parent directory path\n");
+            return false;
+        }
+
+        if (strlen(cmd) == 0) {
+            fprintf(stderr, "oar: runtime: string is too short, I don't think this should happen\n");
+            return false;
+        }
+
+        char* name[strlen(cmd)];
+        strcpy(name, cmd);
+
+        memmove(cmd, cmd + 3, strlen(cmd));
+        snprintf(path, sizeof(path), "%s/%s", parent_cwd, cmd);
+
+        if (chdir(orig_cwd) != 0) {
+            fprintf(stderr, "oar: runtime: error changing directory");
+            return false;
+        }
+        
+        int exit_code;
+        if (spawn_program(name, path, &exit_code, args, argc) != 0) {
+            return false;
+        }
+
+        return true;
     } else { // not a path, resolve using PATH
         if (resolve_from_env_path(cmd, path)) {
             int exit_code;
@@ -286,7 +344,6 @@ bool try_run_func_external(Env *env, const char *cmd, RuntimeValue *args, size_t
                 return false;
             }
 
-            printf("Exited with code %d\n", exit_code);
             return true;
         }
         
